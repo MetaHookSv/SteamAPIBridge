@@ -1,0 +1,9 @@
+LIBRARY steam_api
+EXPORTS
+SteamAPI_GetHSteamUser=MockGetUser
+SteamAPI_GetHSteamPipe=MockGetPipe
+SteamAPI_RegisterCallback=MockRegister
+SteamAPI_UnregisterCallback=MockUnregister
+SteamAPI_RegisterCallResult=MockRegisterResult
+SteamAPI_UnregisterCallResult=MockUnregisterResult
+SteamClient=MockClient
