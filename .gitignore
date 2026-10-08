@@ -1,3 +1,6 @@
 /build/
 /install/
 /thirdparty/cache/
+
+# Generated from the shared FormatValidation source during CMake configuration.
+/.clang-format
