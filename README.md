@@ -47,9 +47,9 @@ scripts\build-SteamAPIBridge-x86-Debug.bat
 scripts\build-SteamAPIBridge-x86-Release.bat
 ```
 
-Requires CMake 3.21+, Visual Studio 2022 Win32 and C++20. Uses static CRT and VC-LTL
-5.3.1. `STEAMSDK_SOURCE_PATH` and `VC_LTL_Root` accept read-only local dependency
-trees; otherwise the pinned SDK and hash-verified VC-LTL package are fetched.
+Requires CMake 3.21+, Visual Studio 2022 Win32 and C++20. Uses the static CRT.
+`STEAMSDK_SOURCE_PATH` accepts a read-only local dependency tree; otherwise the
+pinned SDK is fetched.
 `STEAMAPIBRIDGE_BUILD_TESTS` defaults on for standalone builds, off as a subproject.
 
 CMake target: `SteamAPIBridge` (alias `SteamAPIBridge::SteamAPIBridge`). Consumers
