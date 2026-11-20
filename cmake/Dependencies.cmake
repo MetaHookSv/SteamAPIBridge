@@ -3,7 +3,7 @@ function(steambridge_prepare_dependencies)
         include(FetchContent)
         FetchContent_Declare(steambridge_sdk
             GIT_REPOSITORY https://github.com/MetaHookSv/SteamSDK
-            GIT_TAG 3c1abaf6277f9f99fd16ef40557d6852820b848f
+            GIT_TAG ba2bfcc008b8aa197aba05e6122a15d6d236b80b
             GIT_SUBMODULES "" SOURCE_SUBDIR _source_only)
         FetchContent_MakeAvailable(steambridge_sdk)
         set(STEAMSDK_SOURCE_PATH "${steambridge_sdk_SOURCE_DIR}")

@@ -1,4 +1,3 @@
-LIBRARY steam_api
 EXPORTS
 SteamAPI_GetHSteamUser=MockGetUser
 SteamAPI_GetHSteamPipe=MockGetPipe

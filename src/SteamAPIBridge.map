@@ -1,0 +1,6 @@
+{
+    global:
+        SteamBridge_*;
+    local:
+        *;
+};
