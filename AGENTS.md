@@ -1,11 +1,13 @@
 # SteamAPIBridge
 
-Read README.md for runtime ownership and ABI boundaries. Build with the x86 Debug
-and Release scripts and run CTest. Keep public exports C-compatible and prefixed
-SteamBridge_. Do not link steam_api.lib, initialize or shut down the host Steam
-session, or expose vendor C++ objects in the public ABI. External SDK trees are
-read-only. Preserve historical interface slots and verify callback layouts against
-the referenced Valve headers when extending compatibility. Record simulated and
+Read README.md for runtime ownership and ABI boundaries. Build with the Windows
+x86/x64 and Linux scripts and run CTest on each platform you change. Keep public exports
+C-compatible and prefixed SteamBridge_. Do not link steam_api.lib or expose vendor C++
+objects in the public ABI. Only host mode (SteamBridge_Host*/Server*) initializes or
+shuts down Steam, and only when the host requests it; plugin-mode code never touches
+the game's Steam session. External SDK trees are read-only.
+Preserve historical interface slots and verify callback layouts against the
+referenced Valve headers when extending compatibility. Record simulated and
 real-game verification separately. Tests exercise behavior and binary loading,
 not documentation or configuration text.
 

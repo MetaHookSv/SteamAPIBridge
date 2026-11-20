@@ -1,4 +1,4 @@
-#include <Windows.h>
+#include "Platform.h"
 #include <steam/steam_api.h>
 #include <SteamAPIBridge.h>
 #include "LegacyInterfaces.h"
@@ -11,10 +11,10 @@
 
 namespace
 {
-template <class T> T Resolve(HMODULE module, const char* name) { return reinterpret_cast<T>(GetProcAddress(module, name)); }
+using platform::Resolve;
 struct Runtime
 {
-    HMODULE                                  module{};
+    platform::Module                         module{};
     HSteamUser                               user{};
     HSteamPipe                               pipe{};
     decltype(&SteamAPI_RegisterCallback)     registerCallback{};
@@ -29,7 +29,7 @@ struct Runtime
 
     Runtime()
     {
-        module = GetModuleHandleW(L"steam_api.dll");
+        module = platform::FindRuntime();
         if (!module) return;
         auto getUser = Resolve<decltype(&SteamAPI_GetHSteamUser)>(module, "SteamAPI_GetHSteamUser");
         auto getPipe = Resolve<decltype(&SteamAPI_GetHSteamPipe)>(module, "SteamAPI_GetHSteamPipe");
@@ -44,6 +44,8 @@ struct Runtime
             screenshots = static_cast<ISteamScreenshots*>(find(user, STEAMSCREENSHOTS_INTERFACE_VERSION));
             http        = static_cast<ISteamHTTP*>(find(user, STEAMHTTP_INTERFACE_VERSION));
         }
+#if defined(_WIN32) && !defined(_WIN64)
+        // The GoldSrc 8684 runtime exists only for Windows x86.
         else if (auto getClient = Resolve<legacy::Client012*(__cdecl*)()>(module, "SteamClient"))
         {
             if (auto client = getClient())
@@ -56,6 +58,7 @@ struct Runtime
                 if (!screenshots) oldScreenshots = static_cast<legacy::Screenshots001*>(client->GetISteamScreenshots(user, pipe, "STEAMSCREENSHOTS_INTERFACE_VERSION001"));
             }
         }
+#endif
     }
     bool callbacks() const { return registerCallback && unregisterCallback; }
     bool httpReady() const { return http && callbacks() && registerResult && unregisterResult; }
@@ -71,7 +74,7 @@ struct Request
 } // namespace
 struct SteamBridgeContext
 {
-    HMODULE                               module{};
+    platform::Module                      module{};
     HSteamUser                            user{};
     HSteamPipe                            pipe{};
     std::unordered_map<uint32_t, Request> requests;
@@ -114,7 +117,7 @@ bool Bind(SteamBridgeContext& c, const Runtime& r)
 struct Callback final : CCallbackBase, std::enable_shared_from_this<Callback>
 {
     std::weak_ptr<SteamBridgeContext>        owner;
-    HMODULE                                  module;
+    platform::Module                         module;
     decltype(&SteamAPI_UnregisterCallback)   unregisterCallback;
     decltype(&SteamAPI_UnregisterCallResult) unregisterResult;
     SteamAPICall_t                           call{};
@@ -126,7 +129,7 @@ struct Callback final : CCallbackBase, std::enable_shared_from_this<Callback>
     {
         if (!active) return;
         active = false;
-        if (GetModuleHandleW(L"steam_api.dll") != module) return;
+        if (platform::FindRuntime() != module) return;
         if (call) unregisterResult(this, call);
         else
             unregisterCallback(this);
@@ -363,8 +366,8 @@ SteamBridgeStatus SteamBridge_TagScreenshotUser(SteamBridgeContextHandle context
     if (!c) return SB_INVALID_ARGUMENT;
     Runtime r;
     if (!Bind(*c, r)) return SB_UNAVAILABLE;
-    if (r.screenshots) return Result(r.screenshots->TagUser(screenshot, CSteamID(id)));
-    if (r.oldScreenshots) return Result(r.oldScreenshots->TagUser(screenshot, CSteamID(id)));
+    if (r.screenshots) return Result(r.screenshots->TagUser(screenshot, CSteamID(uint64(id))));
+    if (r.oldScreenshots) return Result(r.oldScreenshots->TagUser(screenshot, CSteamID(uint64(id))));
     return SB_UNAVAILABLE;
 }
 SteamBridgeStatus SteamBridge_HTTPCreate(SteamBridgeContextHandle context, int32_t method, const char* url, uint32_t* request)
@@ -411,7 +414,7 @@ SteamBridgeStatus SteamBridge_HTTPSend(SteamBridgeContextHandle context, uint32_
     }
     SteamAPICall_t call{};
     if (!(stream ? r.http->SendHTTPRequestAndStreamResponse(request, &call) : r.http->SendHTTPRequest(request, &call)) || !call) return SB_FAILED;
-    auto cb             = std::make_shared<Callback>(c, r, HTTPRequestCompleted_t::k_iCallback, sizeof(HTTPRequestCompleted_t));
+    auto cb             = std::make_shared<Callback>(c, r, HTTPRequestCompleted_t::k_iCallback, int(sizeof(HTTPRequestCompleted_t)));
     cb->call            = call;
     cb->request         = request;
     cb->active          = true;
