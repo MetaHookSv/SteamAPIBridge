@@ -70,5 +70,8 @@ if(STEAMAPIBRIDGE_BUILD_TESTS)
     add_subdirectory(tests)
 endif()
 
-# Shared formatting targets are explicit; ordinary native builds do not run them.
-include(cmake/FormatValidation.cmake)
+# Shared formatting targets are explicit; ordinary native builds do not run them. A parent project
+# owns its formatting targets, so a subproject neither fetches the tooling nor adds its own.
+if(PROJECT_IS_TOP_LEVEL)
+    include(cmake/FormatValidation.cmake)
+endif()
