@@ -3,6 +3,7 @@
 #include <SteamAPIBridge.h>
 #include <steam/steam_api.h>
 #include <steam/steam_gameserver.h>
+#include <steam/steamnetworkingfakeip.h>
 #include <cassert>
 #include <cstring>
 
@@ -10,12 +11,18 @@ using SetIntFn    = void(S_CALLTYPE*)(int);
 using StatFn      = int(S_CALLTYPE*)(int);
 using ForwardedFn = const MockHostForwardedData*(S_CALLTYPE*)();
 using QueueFn     = void(S_CALLTYPE*)(int, int, const void*, int);
+using QueueFakeFn = void(S_CALLTYPE*)(int, uint32_t, uint16_t, int);
+using SetFakeIPFn = void(S_CALLTYPE*)(int, uint32_t, uint16_t);
+using EmitDebugFn = int(S_CALLTYPE*)(int, const char*);
 namespace mock
 {
 SetIntFn    failInit, voiceResult;
 StatFn      stat;
 ForwardedFn forwarded;
 QueueFn     queue;
+QueueFakeFn queueFake;
+SetFakeIPFn setFakeIP;
+EmitDebugFn emitDebug;
 } // namespace mock
 using namespace mock;
 
@@ -49,6 +56,16 @@ void STEAMBRIDGE_CALL OnServer(void* user, const SteamBridgeServerEvent* event)
     ++e.count;
     e.last = *event;
     if (e.shutdown) SteamBridge_ServerShutdown();
+}
+struct DebugOutput
+{
+    int  level{};
+    char text[16]{};
+} debugOutput;
+void STEAMBRIDGE_CALL OnDebug(int32_t level, const char* message)
+{
+    debugOutput.level = level;
+    std::strncpy(debugOutput.text, message, sizeof(debugOutput.text) - 1);
 }
 template <class T> void Queue(const T& payload, bool gameServer) { queue(T::k_iCallback, gameServer, &payload, int(sizeof(T))); }
 
@@ -119,6 +136,46 @@ void Client(const char* mock)
     assert(24000 == SteamBridge_VoiceGetOptimalSampleRate());
     assert(SB_OK == SteamBridge_VoiceStopRecording());
 
+    // A client FakeIP port sends to FakeIPs and receives their datagrams.
+    SteamBridgeFakeUDPPortHandle port{};
+    assert(SB_UNAVAILABLE == SteamBridge_FakeUDPPortCreate(1, 0, &port) && !port);
+    assert(SB_INVALID_ARGUMENT == SteamBridge_FakeUDPPortCreate(0, -2, &port));
+    assert(SB_OK == SteamBridge_FakeUDPPortCreate(0, -1, &port) && port);
+    assert(-1 == forwarded()->portIndex && 1 == forwarded()->portsCreated);
+    assert(SteamBridge_IsFakeIPv4(0xa9fe0102) && !SteamBridge_IsFakeIPv4(0x0a000001));
+    int32_t result{};
+    assert(SB_OK == SteamBridge_FakeUDPPortSend(port, 0xa9fe0102, 27015, "data", 4, k_nSteamNetworkingSend_NoNagle, &result));
+    assert(k_EResultOK == result && 0xa9fe0102 == forwarded()->sendIP && 27015 == forwarded()->sendPort);
+    assert(4 == forwarded()->sendBytes && k_nSteamNetworkingSend_NoNagle == forwarded()->sendFlags);
+    assert(SB_FAILED == SteamBridge_FakeUDPPortSend(port, 0, 27015, "data", 4, 0, &result) && k_EResultInvalidParam == result);
+    char                      datagram[8]{};
+    SteamBridgeFakeUDPMessage message{};
+    assert(SB_OK == SteamBridge_FakeUDPPortReceive(port, datagram, sizeof(datagram), &message) && SB_FAKE_UDP_NONE == message.kind);
+    queueFake(MOCK_FAKE_FROM_IP, 0xa9fe0102, 27015, 8);
+    queueFake(MOCK_FAKE_FROM_IP, 0xa9fe0102, 27015, 9);
+    queueFake(MOCK_FAKE_FROM_STEAM, 0, 0, 2);
+    assert(SB_OK == SteamBridge_FakeUDPPortReceive(port, datagram, sizeof(datagram), &message));
+    assert(SB_FAKE_UDP_MESSAGE == message.kind && 8 == message.bytes && 0xa9fe0102 == message.ip && 27015 == message.port && 'f' == datagram[7]);
+    // A datagram that does not fit, or that does not come from an IP address, is dropped and described.
+    assert(SB_OK == SteamBridge_FakeUDPPortReceive(port, datagram, sizeof(datagram), &message));
+    assert(SB_FAKE_UDP_TOO_LARGE == message.kind && 9 == message.bytes && 0 == message.ip && !std::strcmp("169.254.1.2:27015", message.peer));
+    assert(SB_OK == SteamBridge_FakeUDPPortReceive(port, datagram, sizeof(datagram), &message));
+    assert(SB_FAKE_UDP_NOT_IP == message.kind && !std::strcmp("steamid:76561198000000004", message.peer));
+    assert(3 == forwarded()->messagesReleased);
+    assert(SB_OK == SteamBridge_FakeUDPPortScheduleCleanup(port, 0xa9fe0102, 27016));
+    assert(0xa9fe0102 == forwarded()->cleanupIP && 27016 == forwarded()->cleanupPort);
+    assert(SB_INVALID_ARGUMENT == SteamBridge_NetworkingSetDebugOutput(k_ESteamNetworkingSocketsDebugOutputType_Everything + 1, OnDebug));
+    assert(SB_OK == SteamBridge_NetworkingSetDebugOutput(k_ESteamNetworkingSocketsDebugOutputType_Msg, OnDebug));
+    assert(k_ESteamNetworkingSocketsDebugOutputType_Msg == forwarded()->debugLevel);
+    assert(emitDebug(k_ESteamNetworkingSocketsDebugOutputType_Warning, "relay"));
+    assert(k_ESteamNetworkingSocketsDebugOutputType_Warning == debugOutput.level && !std::strcmp("relay", debugOutput.text));
+    assert(SB_OK == SteamBridge_NetworkingSetDebugOutput(k_ESteamNetworkingSocketsDebugOutputType_None, nullptr));
+    assert(k_ESteamNetworkingSocketsDebugOutputType_None == forwarded()->debugLevel && !emitDebug(1, "off"));
+    SteamBridge_FakeUDPPortDestroy(port);
+    assert(1 == forwarded()->portsDestroyed);
+    // A port left open is destroyed with the client session.
+    assert(SB_OK == SteamBridge_FakeUDPPortCreate(0, -1, &port));
+
     ClientGameServerDeny_t deny{};
     deny.m_unGameServerIP   = 0x7f000001;
     deny.m_usGameServerPort = 27015;
@@ -144,6 +201,7 @@ void Client(const char* mock)
     assert(3 == events.count && SB_CLIENT_OVERLAY == events.last.kind && events.last.active);
     assert(!SteamBridge_HostIsActive());
     assert(0 == mock::stat(MOCK_HOST_CALLBACKS) && 1 == mock::stat(MOCK_HOST_SHUTDOWNS));
+    assert(2 == forwarded()->portsDestroyed && !SteamBridge_IsFakeIPv4(0xa9fe0102));
     assert(SB_UNAVAILABLE == SteamBridge_UserGetSteamID(&id));
     SteamBridge_HostSetClientCallback(nullptr, nullptr);
 }
@@ -159,7 +217,26 @@ void DedicatedServer(const char* mock)
     assert(SB_OK == SteamBridge_ServerInit(0, 27015, 27015, SB_SERVER_MODE_SECURE, "1.0"));
     assert(SB_SERVER_MODE_SECURE == forwarded()->mode);
     assert(SB_INVALID_ARGUMENT == SteamBridge_ServerInit(0, 27015, 27015, SB_SERVER_MODE_SECURE, "1.0"));
-    assert(SteamBridge_ServerIsActive() && 6 == mock::stat(MOCK_HOST_CALLBACKS));
+    assert(SteamBridge_ServerIsActive() && 7 == mock::stat(MOCK_HOST_CALLBACKS));
+
+    // Without a client, the networking utilities come from the game server.
+    assert(SteamBridge_IsFakeIPv4(0xa9fe0102));
+    assert(SB_INVALID_ARGUMENT == SteamBridge_ServerBeginAsyncRequestFakeIP(0));
+    assert(SB_OK == SteamBridge_ServerBeginAsyncRequestFakeIP(1) && 1 == forwarded()->fakeIPPorts);
+    assert(SB_FAILED == SteamBridge_ServerBeginAsyncRequestFakeIP(2));
+    int32_t  fakeResult = 1;
+    uint32_t fakeIP     = 1;
+    uint16_t fakePorts[2]{1, 1};
+    setFakeIP(k_EResultBusy, 0xa9fe0102, 27015);
+    assert(SB_OK == SteamBridge_ServerGetFakeIP(0, &fakeResult, &fakeIP, fakePorts, 2));
+    assert(k_EResultBusy == fakeResult && 0 == fakeIP && 0 == fakePorts[0]);
+    setFakeIP(k_EResultOK, 0xa9fe0102, 27015);
+    assert(SB_OK == SteamBridge_ServerGetFakeIP(0, &fakeResult, &fakeIP, fakePorts, 2));
+    assert(k_EResultOK == fakeResult && 0xa9fe0102 == fakeIP && 27015 == fakePorts[0] && 0 == fakePorts[1]);
+    SteamBridgeFakeUDPPortHandle serverPort{};
+    int                          destroyed = forwarded()->portsDestroyed;
+    assert(SB_UNAVAILABLE == SteamBridge_FakeUDPPortCreate(0, -1, &serverPort));
+    assert(SB_OK == SteamBridge_FakeUDPPortCreate(1, 0, &serverPort) && 0 == forwarded()->portIndex);
     assert(SB_OK == SteamBridge_ServerSetProduct("valve"));
     assert(!std::strcmp("valve", forwarded()->product));
     assert(SB_OK == SteamBridge_ServerSetKeyValue("protocol", "48"));
@@ -196,6 +273,11 @@ void DedicatedServer(const char* mock)
     // The policy payload that the client dispatcher left queued arrives here too.
     assert(5 == events.count && SB_SERVER_CLIENT_DENY == events.last.kind && 0 == mock::stat(MOCK_HOST_QUEUED));
     assert(76561198000000002 == events.last.steamID && k_EDenyNotLoggedOn == int(events.last.reason) && !std::strcmp("denied", events.last.text));
+    SteamNetworkingFakeIPResult_t allocated{};
+    allocated.m_eResult = k_EResultOK;
+    Queue(allocated, true);
+    SteamBridge_ServerRunCallbacks();
+    assert(6 == events.count && SB_SERVER_FAKE_IP_RESULT == events.last.kind && k_EResultOK == events.last.result);
 
     GSClientKick_t kick{};
     kick.m_SteamID     = CSteamID(uint64(76561198000000002));
@@ -203,8 +285,11 @@ void DedicatedServer(const char* mock)
     Queue(kick, true);
     events.shutdown = true;
     SteamBridge_ServerRunCallbacks();
-    assert(6 == events.count && SB_SERVER_CLIENT_KICK == events.last.kind && k_EDenyCheater == int(events.last.reason));
+    assert(7 == events.count && SB_SERVER_CLIENT_KICK == events.last.kind && k_EDenyCheater == int(events.last.reason));
     assert(!SteamBridge_ServerIsActive() && 0 == mock::stat(MOCK_HOST_CALLBACKS) && 1 == mock::stat(MOCK_HOST_SERVER_SHUTDOWNS));
+    // The server port is destroyed with the game server, and its utilities go with it.
+    assert(destroyed + 1 == forwarded()->portsDestroyed && !SteamBridge_IsFakeIPv4(0xa9fe0102));
+    assert(SB_UNAVAILABLE == SteamBridge_ServerBeginAsyncRequestFakeIP(1));
     assert(SteamBridge_HostIsActive());
     SteamBridge_ServerSetCallback(nullptr, nullptr);
 
@@ -226,7 +311,11 @@ int main(int argc, char** argv)
     mock::stat        = platform::Resolve<StatFn>(module, "MockHostStat");
     mock::forwarded   = platform::Resolve<ForwardedFn>(module, "MockHostForwarded");
     mock::queue       = platform::Resolve<QueueFn>(module, "MockHostQueue");
+    mock::queueFake   = platform::Resolve<QueueFakeFn>(module, "MockHostQueueFakeMessage");
+    mock::setFakeIP   = platform::Resolve<SetFakeIPFn>(module, "MockHostSetFakeIP");
+    mock::emitDebug   = platform::Resolve<EmitDebugFn>(module, "MockHostEmitDebug");
     assert(mock::failInit && mock::voiceResult && mock::stat && mock::forwarded && mock::queue);
+    assert(mock::queueFake && mock::setFakeIP && mock::emitDebug);
     Unavailable(argv[2]);
     Client(argv[1]);
     DedicatedServer(argv[1]);

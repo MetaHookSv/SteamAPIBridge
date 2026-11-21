@@ -17,6 +17,25 @@ struct MockHostForwardedData
     uint32_t pcmRate;
     int      mode;
     uint32_t pcmRequested;
+    // FakeIP ports and the datagrams sent through them.
+    int      portIndex;
+    int      portsCreated;
+    int      portsDestroyed;
+    uint32_t sendIP;
+    uint16_t sendPort;
+    uint32_t sendBytes;
+    int      sendFlags;
+    uint32_t cleanupIP;
+    uint16_t cleanupPort;
+    int      messagesReleased;
+    int      fakeIPPorts;
+    int      debugLevel;
+};
+// Kinds of message MockHostQueueFakeMessage puts on a FakeIP port.
+enum
+{
+    MOCK_FAKE_FROM_IP    = 0,
+    MOCK_FAKE_FROM_STEAM = 1
 };
 enum
 {
