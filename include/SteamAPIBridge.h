@@ -116,7 +116,8 @@ extern "C"
         SB_SERVER_POLICY         = 3,
         SB_SERVER_CLIENT_APPROVE = 4,
         SB_SERVER_CLIENT_DENY    = 5,
-        SB_SERVER_CLIENT_KICK    = 6
+        SB_SERVER_CLIENT_KICK    = 6,
+        SB_SERVER_FAKE_IP_RESULT = 7
     };
     // Values of Steamworks EServerMode.
     enum
@@ -143,7 +144,7 @@ extern "C"
         char     server[SB_CLIENT_SERVER_BYTES];
         char     password[SB_CLIENT_SERVER_BYTES];
     } SteamBridgeClientEvent;
-    // result is the Steam EResult of a logon failure; reason is the EDenyReason of a deny or kick.
+    // result is the Steam EResult of a logon failure or a FakeIP request; reason is the EDenyReason of a deny or kick.
     typedef struct SteamBridgeServerEvent
     {
         uint32_t kind;
@@ -225,6 +226,58 @@ extern "C"
     STEAMBRIDGE_API SteamBridgeStatus STEAMBRIDGE_CALL SteamBridge_ServerHandleIncomingPacket(const void* data, uint32_t bytes, uint32_t ip, uint16_t port);
     // Returns the packet length, or zero when no packet is pending.
     STEAMBRIDGE_API uint32_t STEAMBRIDGE_CALL SteamBridge_ServerGetNextOutgoingPacket(void* data, uint32_t capacity, uint32_t* ip, uint16_t* port);
+    // Asks Steam for a FakeIP with ports fake ports; SB_SERVER_FAKE_IP_RESULT reports the outcome.
+    STEAMBRIDGE_API SteamBridgeStatus STEAMBRIDGE_CALL SteamBridge_ServerBeginAsyncRequestFakeIP(int32_t ports);
+    // *result receives the Steam EResult of the request (k_EResultBusy while it is pending). On
+    // k_EResultOK, *ip and up to count ports from firstPort are written; otherwise they are cleared.
+    STEAMBRIDGE_API SteamBridgeStatus STEAMBRIDGE_CALL SteamBridge_ServerGetFakeIP(int32_t firstPort, int32_t* result, uint32_t* ip, uint16_t* ports, uint32_t count);
+
+    // FakeIP datagrams (ISteamNetworkingFakeUDPPort), host mode. IPv4 addresses and ports are in
+    // host byte order, as in Steam's SteamNetworkingIPAddr. A client port belongs to the client
+    // session and a server port to the game server session; shutting a session down destroys its
+    // remaining ports and invalidates their handles. Create and destroy ports on the host's main
+    // thread; Send, Receive and ScheduleCleanup may run on any thread while the port exists.
+    typedef struct SteamBridgeFakeUDPPort* SteamBridgeFakeUDPPortHandle;
+    enum
+    {
+        SB_FAKE_UDP_NONE      = 0,
+        SB_FAKE_UDP_MESSAGE   = 1,
+        SB_FAKE_UDP_TOO_LARGE = 2,
+        SB_FAKE_UDP_NOT_IP    = 3
+    };
+    enum
+    {
+        SB_FAKE_UDP_PEER_BYTES = 128
+    };
+    // kind is an SB_FAKE_UDP_* value. bytes is the message size, also when it did not fit. ip
+    // and port are the sender of a received message. peer is the sender as Steam prints it, for
+    // a message that was dropped (SB_FAKE_UDP_TOO_LARGE or SB_FAKE_UDP_NOT_IP).
+    typedef struct SteamBridgeFakeUDPMessage
+    {
+        uint32_t kind;
+        uint32_t bytes;
+        uint32_t ip;
+        uint16_t port;
+        char     peer[SB_FAKE_UDP_PEER_BYTES];
+    } SteamBridgeFakeUDPMessage;
+    typedef void(STEAMBRIDGE_CALL* SteamBridgeNetworkingDebugCallback)(int32_t level, const char* message);
+
+    // gameServer selects the game server session. fakeServerPort is the index of a fake port the
+    // game server requested, or -1 for a port that sends to FakeIPs from a local FakeIP.
+    STEAMBRIDGE_API SteamBridgeStatus STEAMBRIDGE_CALL SteamBridge_FakeUDPPortCreate(uint32_t gameServer, int32_t fakeServerPort, SteamBridgeFakeUDPPortHandle* port);
+    STEAMBRIDGE_API void STEAMBRIDGE_CALL              SteamBridge_FakeUDPPortDestroy(SteamBridgeFakeUDPPortHandle port);
+    // flags are Steam k_nSteamNetworkingSend_* flags; *result receives the Steam EResult, and
+    // anything but k_EResultOK returns SB_FAILED.
+    STEAMBRIDGE_API SteamBridgeStatus STEAMBRIDGE_CALL SteamBridge_FakeUDPPortSend(SteamBridgeFakeUDPPortHandle port, uint32_t ip, uint16_t remotePort, const void* data, uint32_t bytes, int32_t flags, int32_t* result);
+    // Takes at most one pending message. A message from an IP address that fits capacity is
+    // copied into data; any other message is dropped and only described.
+    STEAMBRIDGE_API SteamBridgeStatus STEAMBRIDGE_CALL SteamBridge_FakeUDPPortReceive(SteamBridgeFakeUDPPortHandle port, void* data, uint32_t capacity, SteamBridgeFakeUDPMessage* message);
+    STEAMBRIDGE_API SteamBridgeStatus STEAMBRIDGE_CALL SteamBridge_FakeUDPPortScheduleCleanup(SteamBridgeFakeUDPPortHandle port, uint32_t ip, uint16_t remotePort);
+    // Nonzero when ip is a global or local FakeIP.
+    STEAMBRIDGE_API uint32_t STEAMBRIDGE_CALL SteamBridge_IsFakeIPv4(uint32_t ip);
+    // Forwards SteamNetworkingSockets diagnostics up to level (ESteamNetworkingSocketsDebugOutputType
+    // values). The callback may run on any thread; NULL stops forwarding.
+    STEAMBRIDGE_API SteamBridgeStatus STEAMBRIDGE_CALL SteamBridge_NetworkingSetDebugOutput(int32_t level, SteamBridgeNetworkingDebugCallback callback);
 
 #ifdef __cplusplus
 }

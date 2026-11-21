@@ -74,13 +74,23 @@ only uses the game server functions.
   heartbeats, ticket authentication (`SendUserConnectAndAuthenticate_DEPRECATED`),
   bots and shared-socket master server packets. The interface version list matches
   `SteamGameServer_InitEx`.
+* FakeIP: fake UDP ports (`CreateFakeUDPPort`, SteamNetworkingSockets013) on the client or
+  the game server session, the game server's FakeIP request (`BeginAsyncRequestFakeIP`,
+  `GetFakeIP`), FakeIP address checks and SteamNetworkingSockets diagnostics
+  (SteamNetworkingUtils004: the client's, or the game server's without a client). Ports
+  are bridge handles; a session's shutdown destroys the ports it still holds. Received
+  datagrams are copied out and released inside the bridge; one that does not fit, or does
+  not come from an IP address, is dropped and described.
 * Events: ClientGameServerDeny, GameServerChangeRequested and GameOverlayActivated
   reach the client callback during `SteamBridge_HostRunCallbacks`; SteamServersConnected,
-  SteamServerConnectFailure, GSPolicyResponse and GSClientApprove/Deny/Kick reach the
-  server callback during `SteamBridge_ServerRunCallbacks`. Fields are copied out of
+  SteamServerConnectFailure, GSPolicyResponse, GSClientApprove/Deny/Kick and
+  SteamNetworkingFakeIPResult reach the server callback during
+  `SteamBridge_ServerRunCallbacks`. Fields are copied out of
   Steam's payloads; IP addresses and ports pass through unchanged.
 
-Host functions are not thread-safe; call them from the host's main thread. A callback
+Host functions are not thread-safe; call them from the host's main thread. FakeIP port
+send, receive and cleanup may run on any thread while the port exists, and the networking
+diagnostics callback may run on any thread. A callback
 may call `SteamBridge_HostShutdown` or `SteamBridge_ServerShutdown`; the shutdown runs
 after the native dispatcher returns. `SteamBridge_HostShutdown` shuts down an active
 game server first. Plugin contexts may use the runtime that host mode loaded; destroy
@@ -123,7 +133,9 @@ CTest covers, on every supported platform, absent runtimes and host mode against
 fixture runtime: client initialization failure and retry, connection tickets, voice
 capture/decoding and non-OK voice results, client and game server event translation
 and dispatcher separation, deferred shutdown from callbacks, game server setters and
-authentication, packets, and dedicated (server-only) sessions. On Windows it also
+authentication, packets, dedicated (server-only) sessions, and FakeIP ports: datagram
+send results, delivery and dropping, cleanup, session-owned port destruction, the game
+server's FakeIP request and result event, and diagnostics forwarding. On Windows it also
 covers plugin mode: absent/uninitialized Steam, legacy (x86) and intermediate-modern
 exports, exact-version availability and retry, SteamID/screenshots, cookie/certificate
 forwarding, stream events, context isolation, cancellation and reentrant destruction.
@@ -134,8 +146,9 @@ accepts real Steam DLL and consumer DLL paths for loader-only checks.
 `SteamBridgeHostSmoke <runtime> [seconds]` needs a running, logged-in Steam client and
 `steam_appid.txt` in the working directory: it initializes the client, logs a game
 server on anonymously, authenticates the client's ticket and exits zero on
-GSClientApprove. Neither validates screenshot submission, real HTTP traffic, engine
-hooks or gameplay; those require running each target game.
+GSClientApprove. Neither validates screenshot submission, real HTTP traffic, FakeIP
+traffic over the Steam relay, engine hooks or gameplay; those require running each target
+game (FakeIP traffic also needs a second Steam account).
 
 The SDK notice is installed with the runtime. Historical ABI declarations derive
 from Valve Steamworks headers; see their provenance in `src/LegacyInterfaces.h`.

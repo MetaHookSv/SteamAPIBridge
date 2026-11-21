@@ -1,10 +1,20 @@
 #include "Platform.h"
 #include <steam/steam_api.h>
 #include <steam/steam_gameserver.h>
+#include <steam/steamnetworkingfakeip.h>
 #include <SteamAPIBridge.h>
+#include <algorithm>
+#include <atomic>
 #include <cstring>
 #include <memory>
 #include <vector>
+
+// The object behind a public FakeIP port handle.
+struct SteamBridgeFakeUDPPort
+{
+    ISteamNetworkingFakeUDPPort* port;
+    bool                         gameServer;
+};
 
 namespace
 {
@@ -46,6 +56,12 @@ struct Host
     // Shutdown requested by a host callback runs after the native dispatcher returns.
     unsigned dispatchDepth{};
     bool     pendingServerShutdown{}, pendingHostShutdown{};
+    // FakeIP networking. utils is the client's, or the game server's when no client is initialized.
+    ISteamNetworkingSockets*                             sockets{};
+    ISteamNetworkingSockets*                             serverSockets{};
+    ISteamNetworkingUtils*                               utils{};
+    bool                                                 utilsFromServer{};
+    std::vector<std::unique_ptr<SteamBridgeFakeUDPPort>> ports;
 } host;
 
 // Copies a truncated, NUL-terminated string; capacity must be nonzero.
@@ -123,6 +139,10 @@ struct HostCallback final : CCallbackBase
                 event.ownerSteamID = p->m_OwnerSteamID.ConvertToUint64();
                 break;
             }
+            case SteamNetworkingFakeIPResult_t::k_iCallback:
+                event.kind   = SB_SERVER_FAKE_IP_RESULT;
+                event.result = static_cast<SteamNetworkingFakeIPResult_t*>(payload)->m_eResult;
+                break;
             case GSClientDeny_t::k_iCallback:
             {
                 auto p        = static_cast<GSClientDeny_t*>(payload);
@@ -169,17 +189,34 @@ void Unregister(std::vector<std::unique_ptr<HostCallback>>& list)
         host.unregisterCallback(callback.get());
     list.clear();
 }
+// Destroys the FakeIP ports a session still holds before the session shuts down.
+void DestroyPorts(bool gameServer)
+{
+    std::erase_if(host.ports, [&](const std::unique_ptr<SteamBridgeFakeUDPPort>& port) {
+        if (port->gameServer != gameServer) return false;
+        port->port->DestroyFakeUDPPort();
+        return true;
+    });
+}
 void ShutdownServer()
 {
     if (!host.server) return;
+    DestroyPorts(true);
     Unregister(host.serverCallbacks);
-    host.server = nullptr;
+    host.server        = nullptr;
+    host.serverSockets = nullptr;
+    if (host.utilsFromServer)
+    {
+        host.utils           = nullptr;
+        host.utilsFromServer = false;
+    }
     host.serverShutdown();
 }
 void ShutdownHost()
 {
     if (!host.module) return;
     ShutdownServer();
+    DestroyPorts(false);
     Unregister(host.clientCallbacks);
     if (host.client) host.shutdown();
     platform::UnloadRuntime(host.module);
@@ -212,6 +249,26 @@ template <class F> SteamBridgeStatus Server(F&& fn)
     if (!host.server) return SB_UNAVAILABLE;
     fn(*host.server);
     return SB_OK;
+}
+SteamNetworkingIPAddr IPv4(uint32_t ip, uint16_t port)
+{
+    SteamNetworkingIPAddr address;
+    address.SetIPv4(ip, port);
+    return address;
+}
+// Steam calls the debug output function without user data, so the consumer's callback is global.
+std::atomic<SteamBridgeNetworkingDebugCallback> networkingDebugOutput{};
+void                                            NetworkingDebugOutput(ESteamNetworkingSocketsDebugOutputType level, const char* message)
+{
+    auto callback = networkingDebugOutput.load();
+    if (!callback || !message) return;
+    // Exceptions must not cross the C callback boundary.
+    try
+    {
+        callback(int32_t(level), message);
+    }
+    catch (...)
+    {}
 }
 } // namespace
 
@@ -254,6 +311,9 @@ SteamBridgeStatus SteamBridge_HostInit(const char* runtimePath, uint32_t initial
             h.user               = static_cast<ISteamUser*>(h.findUser(steamUser, STEAMUSER_INTERFACE_VERSION));
             h.friends            = static_cast<ISteamFriends*>(h.findUser(steamUser, STEAMFRIENDS_INTERFACE_VERSION));
             h.apps               = static_cast<ISteamApps*>(h.findUser(steamUser, STEAMAPPS_INTERFACE_VERSION));
+            h.sockets            = static_cast<ISteamNetworkingSockets*>(h.findUser(steamUser, STEAMNETWORKINGSOCKETS_INTERFACE_VERSION));
+            // The networking utilities are global, not per user (SteamNetworkingUtils_SteamAPI).
+            h.utils = static_cast<ISteamNetworkingUtils*>(h.findUser(0, STEAMNETWORKINGUTILS_INTERFACE_VERSION));
         }
         h.clientFn   = host.clientFn;
         h.clientUser = host.clientUser;
@@ -416,6 +476,7 @@ SteamBridgeStatus SteamBridge_ServerInit(uint32_t serverIP, uint16_t gamePort, u
         Register<GSClientApprove_t>(host.serverCallbacks, true);
         Register<GSClientDeny_t>(host.serverCallbacks, true);
         Register<GSClientKick_t>(host.serverCallbacks, true);
+        Register<SteamNetworkingFakeIPResult_t>(host.serverCallbacks, true);
     }
     catch (...)
     {
@@ -423,7 +484,13 @@ SteamBridgeStatus SteamBridge_ServerInit(uint32_t serverIP, uint16_t gamePort, u
         host.serverShutdown();
         return SB_FAILED;
     }
-    host.server = server;
+    host.server        = server;
+    host.serverSockets = static_cast<ISteamNetworkingSockets*>(host.findServer(host.serverGetUser(), STEAMNETWORKINGSOCKETS_INTERFACE_VERSION));
+    if (!host.utils)
+    {
+        host.utils           = static_cast<ISteamNetworkingUtils*>(host.findServer(0, STEAMNETWORKINGUTILS_INTERFACE_VERSION));
+        host.utilsFromServer = host.utils != nullptr;
+    }
     return SB_OK;
 }
 void SteamBridge_ServerShutdown()
@@ -553,4 +620,107 @@ uint32_t SteamBridge_ServerGetNextOutgoingPacket(void* data, uint32_t capacity, 
     *port     = 0;
     int bytes = host.server->GetNextOutgoingPacket(data, int(capacity), ip, port);
     return bytes > 0 && uint32_t(bytes) <= capacity ? uint32_t(bytes) : 0;
+}
+SteamBridgeStatus SteamBridge_ServerBeginAsyncRequestFakeIP(int32_t ports)
+{
+    if (ports <= 0) return SB_INVALID_ARGUMENT;
+    if (!host.serverSockets) return SB_UNAVAILABLE;
+    return Result(host.serverSockets->BeginAsyncRequestFakeIP(ports));
+}
+SteamBridgeStatus SteamBridge_ServerGetFakeIP(int32_t firstPort, int32_t* result, uint32_t* ip, uint16_t* ports, uint32_t count)
+{
+    if (!result || !ip || (count && !ports)) return SB_INVALID_ARGUMENT;
+    *result = 0;
+    *ip     = 0;
+    std::fill_n(ports, count, uint16_t(0));
+    if (firstPort < 0) return SB_INVALID_ARGUMENT;
+    if (!host.serverSockets) return SB_UNAVAILABLE;
+    SteamNetworkingFakeIPResult_t info{};
+    host.serverSockets->GetFakeIP(firstPort, &info);
+    *result = info.m_eResult;
+    if (info.m_eResult != k_EResultOK) return SB_OK;
+    *ip = info.m_unIP;
+    std::copy_n(info.m_unPorts, std::min<uint32_t>(count, SteamNetworkingFakeIPResult_t::k_nMaxReturnPorts), ports);
+    return SB_OK;
+}
+
+SteamBridgeStatus SteamBridge_FakeUDPPortCreate(uint32_t gameServer, int32_t fakeServerPort, SteamBridgeFakeUDPPortHandle* port)
+{
+    if (!port) return SB_INVALID_ARGUMENT;
+    *port = nullptr;
+    if (fakeServerPort < -1) return SB_INVALID_ARGUMENT;
+    ISteamNetworkingSockets* sockets = gameServer ? host.serverSockets : host.sockets;
+    if (!sockets) return SB_UNAVAILABLE;
+    ISteamNetworkingFakeUDPPort* native = sockets->CreateFakeUDPPort(fakeServerPort);
+    if (!native) return SB_FAILED;
+    try
+    {
+        host.ports.push_back(std::make_unique<SteamBridgeFakeUDPPort>(SteamBridgeFakeUDPPort{native, gameServer != 0}));
+    }
+    catch (...)
+    {
+        native->DestroyFakeUDPPort();
+        return SB_FAILED;
+    }
+    *port = host.ports.back().get();
+    return SB_OK;
+}
+void SteamBridge_FakeUDPPortDestroy(SteamBridgeFakeUDPPortHandle port)
+{
+    auto found = std::find_if(host.ports.begin(), host.ports.end(), [&](const std::unique_ptr<SteamBridgeFakeUDPPort>& owned) { return owned.get() == port; });
+    if (found == host.ports.end()) return;
+    (*found)->port->DestroyFakeUDPPort();
+    host.ports.erase(found);
+}
+SteamBridgeStatus SteamBridge_FakeUDPPortSend(SteamBridgeFakeUDPPortHandle port, uint32_t ip, uint16_t remotePort, const void* data, uint32_t bytes, int32_t flags, int32_t* result)
+{
+    if (!result) return SB_INVALID_ARGUMENT;
+    *result = 0;
+    if (!port || !data || !bytes) return SB_INVALID_ARGUMENT;
+    *result = port->port->SendMessageToFakeIP(IPv4(ip, remotePort), data, bytes, flags);
+    return *result == k_EResultOK ? SB_OK : SB_FAILED;
+}
+SteamBridgeStatus SteamBridge_FakeUDPPortReceive(SteamBridgeFakeUDPPortHandle port, void* data, uint32_t capacity, SteamBridgeFakeUDPMessage* message)
+{
+    if (!message) return SB_INVALID_ARGUMENT;
+    *message = {};
+    if (!port || (capacity && !data)) return SB_INVALID_ARGUMENT;
+    SteamNetworkingMessage_t* received{};
+    if (port->port->ReceiveMessages(&received, 1) != 1 || !received) return SB_OK;
+    message->bytes                       = uint32_t(received->m_cbSize);
+    const SteamNetworkingIPAddr* address = received->m_identityPeer.GetIPAddr();
+    if (!address)
+    {
+        message->kind = SB_FAKE_UDP_NOT_IP;
+        if (host.utils) host.utils->SteamNetworkingIdentity_ToString(received->m_identityPeer, message->peer, sizeof(message->peer));
+    }
+    else if (message->bytes > capacity)
+    {
+        message->kind = SB_FAKE_UDP_TOO_LARGE;
+        if (host.utils) host.utils->SteamNetworkingIPAddr_ToString(*address, message->peer, sizeof(message->peer), true);
+    }
+    else
+    {
+        message->kind = SB_FAKE_UDP_MESSAGE;
+        message->ip   = address->GetIPv4();
+        message->port = address->m_port;
+        std::memcpy(data, received->m_pData, message->bytes);
+    }
+    received->Release();
+    return SB_OK;
+}
+SteamBridgeStatus SteamBridge_FakeUDPPortScheduleCleanup(SteamBridgeFakeUDPPortHandle port, uint32_t ip, uint16_t remotePort)
+{
+    if (!port) return SB_INVALID_ARGUMENT;
+    port->port->ScheduleCleanup(IPv4(ip, remotePort));
+    return SB_OK;
+}
+uint32_t          SteamBridge_IsFakeIPv4(uint32_t ip) { return host.utils && host.utils->GetIPv4FakeIPType(ip) > k_ESteamNetworkingFakeIPType_NotFake; }
+SteamBridgeStatus SteamBridge_NetworkingSetDebugOutput(int32_t level, SteamBridgeNetworkingDebugCallback callback)
+{
+    if (level < k_ESteamNetworkingSocketsDebugOutputType_None || level > k_ESteamNetworkingSocketsDebugOutputType_Everything) return SB_INVALID_ARGUMENT;
+    if (!host.utils) return SB_UNAVAILABLE;
+    networkingDebugOutput = callback;
+    host.utils->SetDebugOutputFunction(callback ? ESteamNetworkingSocketsDebugOutputType(level) : k_ESteamNetworkingSocketsDebugOutputType_None, callback ? NetworkingDebugOutput : nullptr);
+    return SB_OK;
 }
