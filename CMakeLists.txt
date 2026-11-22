@@ -34,7 +34,8 @@ target_include_directories(SteamAPIBridge PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/in
 set_target_properties(SteamAPIBridge PROPERTIES DEBUG_POSTFIX "")
 if(MSVC)
     target_compile_definitions(SteamAPIBridge PRIVATE STEAMAPIBRIDGE_EXPORTS WIN32_LEAN_AND_MEAN NOMINMAX _CRT_SECURE_NO_WARNINGS)
-    target_compile_options(SteamAPIBridge PRIVATE /W4 /permissive- /Zi)
+    # The bridge catches exceptions at the C boundary, also when a parent project drops /EHsc from its flags.
+    target_compile_options(SteamAPIBridge PRIVATE /W4 /permissive- /Zi /EHsc)
     target_link_options(SteamAPIBridge PRIVATE /DEBUG)
 else()
     target_compile_definitions(SteamAPIBridge PRIVATE STEAMAPIBRIDGE_EXPORTS)
