@@ -181,6 +181,10 @@ extern "C"
     // Copies the persona name, truncated and NUL-terminated.
     STEAMBRIDGE_API SteamBridgeStatus STEAMBRIDGE_CALL SteamBridge_UserGetPersonaName(char* name, uint32_t capacity);
     STEAMBRIDGE_API SteamBridgeStatus STEAMBRIDGE_CALL SteamBridge_UserIsSubscribedApp(uint32_t appID, uint32_t* subscribed);
+    // Copies the running application's language ("english", "schinese", ...), truncated and
+    // NUL-terminated.
+    STEAMBRIDGE_API SteamBridgeStatus STEAMBRIDGE_CALL SteamBridge_UserGetCurrentGameLanguage(char* language, uint32_t capacity);
+    STEAMBRIDGE_API SteamBridgeStatus STEAMBRIDGE_CALL SteamBridge_UserIsLowViolence(uint32_t* lowViolence);
 
     // Voice. Get and Decompress succeed only for Steam's k_EVoiceResultOK; any other
     // voice result returns SB_FAILED with zero lengths.

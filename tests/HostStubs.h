@@ -1,6 +1,6 @@
 #pragma once
-// Empty implementations of every SteamUser023, SteamGameServer015, SteamNetworkingSockets013 and
-// SteamNetworkingUtils004 method, generated from the Steamworks SDK v1.65 declarations. Mocks
+// Empty implementations of every SteamUser023, SteamApps009, SteamGameServer015, SteamNetworkingSockets013
+// and SteamNetworkingUtils004 method, generated from the Steamworks SDK v1.65 declarations. Mocks
 // override the methods they exercise.
 #include <steam/steam_api.h>
 #include <steam/steam_gameserver.h>
@@ -41,6 +41,45 @@ public:
     SteamAPICall_t              GetMarketEligibility() override { return {}; }
     SteamAPICall_t              GetDurationControl() override { return {}; }
     bool                        BSetDurationControlOnlineState(EDurationControlOnlineState eNewState) override { return {}; }
+};
+class StubApps : public ISteamApps
+{
+public:
+    bool           BIsSubscribed() override { return {}; }
+    bool           BIsLowViolence() override { return {}; }
+    bool           BIsCybercafe() override { return {}; }
+    bool           BIsVACBanned() override { return {}; }
+    const char*    GetCurrentGameLanguage() override { return {}; }
+    const char*    GetAvailableGameLanguages() override { return {}; }
+    bool           BIsSubscribedApp(AppId_t appID) override { return {}; }
+    bool           BIsDlcInstalled(AppId_t appID) override { return {}; }
+    uint32         GetEarliestPurchaseUnixTime(AppId_t nAppID) override { return {}; }
+    bool           BIsSubscribedFromFreeWeekend() override { return {}; }
+    int            GetDLCCount() override { return {}; }
+    bool           BGetDLCDataByIndex(int iDLC, AppId_t* pAppID, bool* pbAvailable, char* pchName, int cchNameBufferSize) override { return {}; }
+    void           InstallDLC(AppId_t nAppID) override {}
+    void           UninstallDLC(AppId_t nAppID) override {}
+    void           RequestAppProofOfPurchaseKey(AppId_t nAppID) override {}
+    bool           GetCurrentBetaName(char* pchName, int cchNameBufferSize) override { return {}; }
+    bool           MarkContentCorrupt(bool bMissingFilesOnly) override { return {}; }
+    uint32         GetInstalledDepots(AppId_t appID, DepotId_t* pvecDepots, uint32 cMaxDepots) override { return {}; }
+    uint32         GetAppInstallDir(AppId_t appID, char* pchFolder, uint32 cchFolderBufferSize) override { return {}; }
+    bool           BIsAppInstalled(AppId_t appID) override { return {}; }
+    CSteamID       GetAppOwner() override { return {}; }
+    const char*    GetLaunchQueryParam(const char* pchKey) override { return {}; }
+    bool           GetDlcDownloadProgress(AppId_t nAppID, uint64* punBytesDownloaded, uint64* punBytesTotal) override { return {}; }
+    int            GetAppBuildId() override { return {}; }
+    void           RequestAllProofOfPurchaseKeys() override {}
+    SteamAPICall_t GetFileDetails(const char* pszFileName) override { return {}; }
+    int            GetLaunchCommandLine(char* pszCommandLine, int cubCommandLine) override { return {}; }
+    bool           BIsSubscribedFromFamilySharing() override { return {}; }
+    bool           BIsTimedTrial(uint32* punSecondsAllowed, uint32* punSecondsPlayed) override { return {}; }
+    bool           SetDlcContext(AppId_t nAppID) override { return {}; }
+    int            GetNumBetas(int* pnAvailable, int* pnPrivate) override { return {}; }
+    bool           GetBetaInfo(int iBetaIndex, uint32* punFlags, uint32* punBuildID, char* pchBetaName, int cchBetaName, char* pchDescription, int cchDescription, uint32* punLastUpdated) override { return {}; }
+    bool           SetActiveBeta(const char* pchBetaName) override { return {}; }
+    void           SetGamePerformanceSetting(EGamePerformanceSetting setting) override {}
+    void           SetGameRenderResolution(uint32 unWidth, uint32 unHeight) override {}
 };
 class StubGameServer : public ISteamGameServer
 {
