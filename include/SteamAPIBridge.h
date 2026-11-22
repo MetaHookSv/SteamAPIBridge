@@ -283,6 +283,155 @@ extern "C"
     // values). The callback may run on any thread; NULL stops forwarding.
     STEAMBRIDGE_API SteamBridgeStatus STEAMBRIDGE_CALL SteamBridge_NetworkingSetDebugOutput(int32_t level, SteamBridgeNetworkingDebugCallback callback);
 
+    // Server browsing (ISteamMatchmakingServers), host mode with an initialized client. IPv4
+    // addresses and ports are in host byte order, as Steam reports them. A list request or a
+    // server query answers through its callback, synchronously during SteamBridge_HostRunCallbacks;
+    // Steam may also answer before the call that started it returns. Shutting the client down
+    // releases the remaining requests and queries and invalidates their handles.
+    typedef struct SteamBridgeServerList* SteamBridgeServerListHandle;
+    enum
+    {
+        SB_SERVER_LIST_INTERNET  = 0,
+        SB_SERVER_LIST_LAN       = 1,
+        SB_SERVER_LIST_FRIENDS   = 2,
+        SB_SERVER_LIST_FAVORITES = 3,
+        SB_SERVER_LIST_HISTORY   = 4,
+        SB_SERVER_LIST_SPECTATOR = 5
+    };
+    enum
+    {
+        SB_SERVERS_LIST_RESPONDED   = 1,
+        SB_SERVERS_LIST_FAILED      = 2,
+        SB_SERVERS_LIST_COMPLETE    = 3,
+        SB_SERVERS_PING_RESPONDED   = 4,
+        SB_SERVERS_PING_FAILED      = 5,
+        SB_SERVERS_PLAYER           = 6,
+        SB_SERVERS_PLAYERS_FAILED   = 7,
+        SB_SERVERS_PLAYERS_COMPLETE = 8
+    };
+    // The string sizes of Steam's gameserveritem_t, and the player name capacity.
+    enum
+    {
+        SB_SERVER_NAME_BYTES        = 64,
+        SB_SERVER_GAME_DIR_BYTES    = 32,
+        SB_SERVER_MAP_BYTES         = 32,
+        SB_SERVER_DESCRIPTION_BYTES = 64,
+        SB_SERVER_TAGS_BYTES        = 128,
+        SB_SERVER_PLAYER_BYTES      = 128
+    };
+    // A copy of Steam's gameserveritem_t. players includes bots; timeLastPlayed is the Unix time
+    // of the last visit for favorite and history servers.
+    typedef struct SteamBridgeServerItem
+    {
+        uint32_t ip;
+        uint16_t queryPort;
+        uint16_t connectionPort;
+        int32_t  ping;
+        uint32_t hadSuccessfulResponse;
+        uint32_t doNotRefresh;
+        uint32_t appID;
+        int32_t  players;
+        int32_t  maxPlayers;
+        int32_t  botPlayers;
+        uint32_t password;
+        uint32_t secure;
+        uint32_t timeLastPlayed;
+        int32_t  serverVersion;
+        uint64_t steamID;
+        char     name[SB_SERVER_NAME_BYTES];
+        char     gameDir[SB_SERVER_GAME_DIR_BYTES];
+        char     map[SB_SERVER_MAP_BYTES];
+        char     description[SB_SERVER_DESCRIPTION_BYTES];
+        char     tags[SB_SERVER_TAGS_BYTES];
+    } SteamBridgeServerItem;
+    // kind is an SB_SERVERS_* value. List events set request and index, and SB_SERVERS_LIST_COMPLETE
+    // sets response (EMatchMakingServerResponse). Server query events set query; SB_SERVERS_PING_RESPONDED
+    // sets server, and SB_SERVERS_PLAYER sets player, score and seconds (time on the server).
+    typedef struct SteamBridgeServersEvent
+    {
+        uint32_t                    kind;
+        SteamBridgeServerListHandle request;
+        uint32_t                    query;
+        int32_t                     index;
+        int32_t                     response;
+        int32_t                     score;
+        float                       seconds;
+        char                        player[SB_SERVER_PLAYER_BYTES];
+        SteamBridgeServerItem       server;
+    } SteamBridgeServersEvent;
+    typedef void(STEAMBRIDGE_CALL* SteamBridgeServersCallback)(void*, const SteamBridgeServersEvent*);
+    // A MatchMakingKeyValuePair_t filter; the strings are copied, truncated to 255 bytes.
+    typedef struct SteamBridgeServerFilter
+    {
+        const char* key;
+        const char* value;
+    } SteamBridgeServerFilter;
+
+    // kind is an SB_SERVER_LIST_* value; LAN lists ignore filters. The request answers until it is released.
+    STEAMBRIDGE_API SteamBridgeStatus STEAMBRIDGE_CALL SteamBridge_ServersRequestList(int32_t kind, uint32_t appID, const SteamBridgeServerFilter* filters, uint32_t filterCount, SteamBridgeServersCallback callback, void* user, SteamBridgeServerListHandle* request);
+    // Stops the request's events at once. Called from a callback, Steam releases it after the dispatcher returns.
+    STEAMBRIDGE_API void STEAMBRIDGE_CALL SteamBridge_ServersReleaseRequest(SteamBridgeServerListHandle request);
+    // SB_FAILED: Steam has no server at index.
+    STEAMBRIDGE_API SteamBridgeStatus STEAMBRIDGE_CALL SteamBridge_ServersGetDetails(SteamBridgeServerListHandle request, int32_t index, SteamBridgeServerItem* server);
+    STEAMBRIDGE_API SteamBridgeStatus STEAMBRIDGE_CALL SteamBridge_ServersCancelQuery(SteamBridgeServerListHandle request);
+    STEAMBRIDGE_API SteamBridgeStatus STEAMBRIDGE_CALL SteamBridge_ServersRefreshQuery(SteamBridgeServerListHandle request);
+    STEAMBRIDGE_API SteamBridgeStatus STEAMBRIDGE_CALL SteamBridge_ServersRefreshServer(SteamBridgeServerListHandle request, int32_t index);
+    STEAMBRIDGE_API SteamBridgeStatus STEAMBRIDGE_CALL SteamBridge_ServersIsRefreshing(SteamBridgeServerListHandle request, uint32_t* refreshing);
+    // Server queries. *query identifies the query in its events and is never zero. A ping ends with
+    // SB_SERVERS_PING_RESPONDED or SB_SERVERS_PING_FAILED, a player query with
+    // SB_SERVERS_PLAYERS_COMPLETE or SB_SERVERS_PLAYERS_FAILED after its SB_SERVERS_PLAYER events.
+    STEAMBRIDGE_API SteamBridgeStatus STEAMBRIDGE_CALL SteamBridge_ServersPing(uint32_t ip, uint16_t port, SteamBridgeServersCallback callback, void* user, uint32_t* query);
+    STEAMBRIDGE_API SteamBridgeStatus STEAMBRIDGE_CALL SteamBridge_ServersPlayerDetails(uint32_t ip, uint16_t port, SteamBridgeServersCallback callback, void* user, uint32_t* query);
+    // Stops the query's events at once; ignores a query that has ended. Called from a callback,
+    // Steam cancels it after the dispatcher returns.
+    STEAMBRIDGE_API void STEAMBRIDGE_CALL SteamBridge_ServersCancelServerQuery(uint32_t query);
+
+    // Favorite and history servers (ISteamMatchmaking). flags are Steam k_unFavoriteFlag* values;
+    // lastPlayed is a Unix time.
+    STEAMBRIDGE_API SteamBridgeStatus STEAMBRIDGE_CALL SteamBridge_MatchmakingGetFavoriteCount(uint32_t* count);
+    STEAMBRIDGE_API SteamBridgeStatus STEAMBRIDGE_CALL SteamBridge_MatchmakingAddFavorite(uint32_t appID, uint32_t ip, uint16_t connectionPort, uint16_t queryPort, uint32_t flags, uint32_t lastPlayed);
+    // SB_FAILED: no such entry.
+    STEAMBRIDGE_API SteamBridgeStatus STEAMBRIDGE_CALL SteamBridge_MatchmakingRemoveFavorite(uint32_t appID, uint32_t ip, uint16_t connectionPort, uint16_t queryPort, uint32_t flags);
+    enum
+    {
+        SB_MATCHMAKING_FAVORITES_CHANGED = 1,
+        SB_MATCHMAKING_PERSONA_CHANGE    = 2
+    };
+    // The favorites fields copy FavoritesListChanged_t (an ip of zero means the whole list changed);
+    // steamID and changeFlags (EPersonaChange) copy PersonaStateChange_t.
+    typedef struct SteamBridgeMatchmakingEvent
+    {
+        uint32_t kind;
+        uint32_t ip;
+        uint32_t queryPort;
+        uint32_t connectionPort;
+        uint32_t appID;
+        uint32_t flags;
+        uint32_t add;
+        uint32_t accountID;
+        uint64_t steamID;
+        int32_t  changeFlags;
+    } SteamBridgeMatchmakingEvent;
+    typedef void(STEAMBRIDGE_CALL* SteamBridgeMatchmakingCallback)(void*, const SteamBridgeMatchmakingEvent*);
+    // A separate slot from the client callback, so another module of the host can own it; events
+    // arrive synchronously during SteamBridge_HostRunCallbacks.
+    STEAMBRIDGE_API void STEAMBRIDGE_CALL SteamBridge_HostSetMatchmakingCallback(SteamBridgeMatchmakingCallback callback, void* user);
+
+    // Friends (ISteamFriends) and VAC status. gameID is Steam's CGameID.
+    typedef struct SteamBridgeFriendGame
+    {
+        uint64_t gameID;
+        uint32_t ip;
+        uint16_t gamePort;
+        uint16_t queryPort;
+        uint64_t lobbySteamID;
+    } SteamBridgeFriendGame;
+    // Copies the friend's persona name, truncated and NUL-terminated.
+    STEAMBRIDGE_API SteamBridgeStatus STEAMBRIDGE_CALL SteamBridge_FriendsGetPersonaName(uint64_t steamID, char* name, uint32_t capacity);
+    // SB_FAILED: the friend is not in a game.
+    STEAMBRIDGE_API SteamBridgeStatus STEAMBRIDGE_CALL SteamBridge_FriendsGetGamePlayed(uint64_t steamID, SteamBridgeFriendGame* game);
+    STEAMBRIDGE_API SteamBridgeStatus STEAMBRIDGE_CALL SteamBridge_AppsIsVACBanned(uint32_t* banned);
+
 #ifdef __cplusplus
 }
 #endif

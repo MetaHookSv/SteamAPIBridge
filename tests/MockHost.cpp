@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <cstring>
 #include <deque>
+#include <functional>
 #include <vector>
 
 namespace
@@ -92,7 +93,7 @@ public:
 } user;
 
 // MockHostSetApps controls whether SteamApps exists and what it reports.
-bool appsAvailable, appsHasLanguage, appsLowViolence;
+bool appsAvailable, appsHasLanguage, appsLowViolence, appsVACBanned;
 char appsLanguage[32];
 class Apps final : public StubApps
 {
@@ -100,7 +101,126 @@ public:
     bool        BIsLowViolence() override { return appsLowViolence; }
     const char* GetCurrentGameLanguage() override { return appsHasLanguage ? appsLanguage : nullptr; }
     bool        BIsSubscribedApp(AppId_t appID) override { return appID == 70; }
+    bool        BIsVACBanned() override { return appsVACBanned; }
 } apps;
+
+// Answers queued for the next client dispatch.
+std::vector<std::function<void()>> answers;
+
+class Matchmaking final : public StubMatchmaking
+{
+public:
+    int  GetFavoriteGameCount() override { return 2; }
+    void Record(AppId_t appID, uint32 ip, uint16 connectionPort, uint16 queryPort, uint32 flags)
+    {
+        forwarded.favoriteAppID          = appID;
+        forwarded.favoriteIP             = ip;
+        forwarded.favoriteConnectionPort = connectionPort;
+        forwarded.favoriteQueryPort      = queryPort;
+        forwarded.favoriteFlags          = flags;
+    }
+    int AddFavoriteGame(AppId_t appID, uint32 ip, uint16 connectionPort, uint16 queryPort, uint32 flags, uint32 lastPlayed) override
+    {
+        Record(appID, ip, connectionPort, queryPort, flags);
+        forwarded.favoriteLastPlayed = lastPlayed;
+        return 0;
+    }
+    bool RemoveFavoriteGame(AppId_t appID, uint32 ip, uint16 connectionPort, uint16 queryPort, uint32 flags) override
+    {
+        Record(appID, ip, connectionPort, queryPort, flags);
+        return ip != 0;
+    }
+} matchmaking;
+
+// Requests and queries are numbered from 1; a request handle points at its number.
+class MatchmakingServers final : public StubMatchmakingServers
+{
+public:
+    std::deque<int>                      requests;
+    ISteamMatchmakingServerListResponse* lastList{};
+    HServerListRequest                   lastRequest{};
+    ISteamMatchmakingPingResponse*       lastPing{};
+    ISteamMatchmakingPlayersResponse*    lastPlayers{};
+    HServerQuery                         lastQuery{};
+    gameserveritem_t                     details;
+    HServerListRequest                   Request(int kind, AppId_t appID, MatchMakingKeyValuePair_t** filters, uint32 count, ISteamMatchmakingServerListResponse* response)
+    {
+        forwarded.listKind    = kind;
+        forwarded.listAppID   = appID;
+        forwarded.listFilters = count;
+        // Steam reads the filters as an array through *filters.
+        if (count)
+        {
+            std::snprintf(forwarded.listFilterKey, sizeof(forwarded.listFilterKey), "%s", (*filters)[0].m_szKey);
+            std::snprintf(forwarded.listFilterValue, sizeof(forwarded.listFilterValue), "%s", (*filters)[count - 1].m_szValue);
+        }
+        // App 0 has no servers to list.
+        if (!appID) return nullptr;
+        requests.push_back(int(requests.size()) + 1);
+        lastList    = response;
+        lastRequest = &requests.back();
+        return lastRequest;
+    }
+    HServerListRequest RequestInternetServerList(AppId_t app, MatchMakingKeyValuePair_t** filters, uint32 count, ISteamMatchmakingServerListResponse* response) override { return Request(0, app, filters, count, response); }
+    HServerListRequest RequestLANServerList(AppId_t app, ISteamMatchmakingServerListResponse* response) override { return Request(1, app, nullptr, 0, response); }
+    HServerListRequest RequestFriendsServerList(AppId_t app, MatchMakingKeyValuePair_t** filters, uint32 count, ISteamMatchmakingServerListResponse* response) override { return Request(2, app, filters, count, response); }
+    HServerListRequest RequestFavoritesServerList(AppId_t app, MatchMakingKeyValuePair_t** filters, uint32 count, ISteamMatchmakingServerListResponse* response) override { return Request(3, app, filters, count, response); }
+    HServerListRequest RequestHistoryServerList(AppId_t app, MatchMakingKeyValuePair_t** filters, uint32 count, ISteamMatchmakingServerListResponse* response) override { return Request(4, app, filters, count, response); }
+    HServerListRequest RequestSpectatorServerList(AppId_t app, MatchMakingKeyValuePair_t** filters, uint32 count, ISteamMatchmakingServerListResponse* response) override { return Request(5, app, filters, count, response); }
+    // Steam answers neither a released request nor a cancelled query.
+    void ReleaseRequest(HServerListRequest request) override
+    {
+        ++forwarded.listsReleased;
+        *static_cast<int*>(request) = 0;
+    }
+    gameserveritem_t* GetServerDetails(HServerListRequest, int index) override { return index == 0 ? &details : nullptr; }
+    void              CancelQuery(HServerListRequest) override { ++forwarded.listCancels; }
+    void              RefreshQuery(HServerListRequest) override { ++forwarded.listRefreshes; }
+    bool              IsRefreshing(HServerListRequest) override { return true; }
+    void              RefreshServer(HServerListRequest, int index) override { forwarded.refreshedServer = index; }
+    HServerQuery      Query(uint32 ip, uint16 port)
+    {
+        forwarded.queryIP   = ip;
+        forwarded.queryPort = port;
+        // Port 0 cannot be queried.
+        return port ? ++lastQuery : HSERVERQUERY_INVALID;
+    }
+    HServerQuery PingServer(uint32 ip, uint16 port, ISteamMatchmakingPingResponse* response) override
+    {
+        lastPing = response;
+        return Query(ip, port);
+    }
+    HServerQuery PlayerDetails(uint32 ip, uint16 port, ISteamMatchmakingPlayersResponse* response) override
+    {
+        lastPlayers = response;
+        return Query(ip, port);
+    }
+    std::vector<HServerQuery> cancelled;
+    void                      CancelServerQuery(HServerQuery query) override
+    {
+        ++forwarded.queriesCancelled;
+        cancelled.push_back(query);
+    }
+    bool Answers(HServerQuery query) const { return std::find(cancelled.begin(), cancelled.end(), query) == cancelled.end(); }
+} matchmakingServers;
+
+// MockHostSetFriends controls whether SteamFriends exists for the next client initialization.
+bool friendsAvailable;
+class Friends final : public StubFriends
+{
+public:
+    const char* GetFriendPersonaName(CSteamID id) override { return id.ConvertToUint64() == 76561198000000005 ? "friend" : nullptr; }
+    bool        GetFriendGamePlayed(CSteamID id, FriendGameInfo_t* info) override
+    {
+        if (id.ConvertToUint64() != 76561198000000005) return false;
+        info->m_gameID       = CGameID(uint64(70));
+        info->m_unGameIP     = 0x0a000002;
+        info->m_usGamePort   = 27015;
+        info->m_usQueryPort  = 27016;
+        info->m_steamIDLobby = CSteamID(uint64(76561198000000006));
+        return true;
+    }
+} friends;
 
 class GameServer final : public StubGameServer
 {
@@ -233,12 +353,22 @@ extern "C"
         clientInitialized = false;
         ++shutdowns;
     }
-    S_API void S_CALLTYPE       SteamAPI_RunCallbacks() { Dispatch(false); }
+    S_API void S_CALLTYPE SteamAPI_RunCallbacks()
+    {
+        auto pending = std::move(answers);
+        answers.clear();
+        for (auto& answer : pending)
+            answer();
+        Dispatch(false);
+    }
     S_API HSteamUser S_CALLTYPE SteamAPI_GetHSteamUser() { return 1; }
     S_API void* S_CALLTYPE      SteamInternal_FindOrCreateUserInterface(HSteamUser steamUser, const char* version)
     {
         if (!std::strcmp(version, STEAMUSER_INTERFACE_VERSION)) return &user;
         if (!std::strcmp(version, STEAMAPPS_INTERFACE_VERSION)) return appsAvailable ? &apps : nullptr;
+        if (!std::strcmp(version, STEAMFRIENDS_INTERFACE_VERSION)) return friendsAvailable ? &friends : nullptr;
+        if (!std::strcmp(version, STEAMMATCHMAKING_INTERFACE_VERSION)) return &matchmaking;
+        if (!std::strcmp(version, STEAMMATCHMAKINGSERVERS_INTERFACE_VERSION)) return &matchmakingServers;
         if (!std::strcmp(version, STEAMNETWORKINGSOCKETS_INTERFACE_VERSION)) return steamUser == 1 ? &clientSockets : nullptr;
         // The global utilities (user 0) exist once the client is initialized.
         if (!std::strcmp(version, STEAMNETWORKINGUTILS_INTERFACE_VERSION)) return clientInitialized && !steamUser ? &utils : nullptr;
@@ -274,12 +404,70 @@ extern "C"
     S_API void S_CALLTYPE MockHostSetFailInit(int value) { failInit = value; }
     S_API void S_CALLTYPE MockHostSetVoiceResult(int value) { voiceResult = value; }
     // Applies to the next client initialization. A NULL language makes SteamApps return NULL.
-    S_API void S_CALLTYPE MockHostSetApps(int available, const char* language, int lowViolence)
+    S_API void S_CALLTYPE MockHostSetApps(int available, const char* language, int lowViolence, int vacBanned)
     {
         appsAvailable   = available != 0;
         appsHasLanguage = language != nullptr;
         appsLowViolence = lowViolence != 0;
+        appsVACBanned   = vacBanned != 0;
         std::snprintf(appsLanguage, sizeof(appsLanguage), "%s", language ? language : "");
+    }
+    S_API void S_CALLTYPE MockHostSetFriends(int available) { friendsAvailable = available != 0; }
+    // Sets the details of server 0 in every list.
+    S_API void S_CALLTYPE MockHostSetServerDetails(const char* name, const char* map, int players)
+    {
+        auto& details = matchmakingServers.details;
+        details       = gameserveritem_t();
+        details.m_NetAdr.Init(0x0a000001, 27016, 27015);
+        details.SetName(name);
+        std::snprintf(details.m_szMap, sizeof(details.m_szMap), "%s", map);
+        std::snprintf(details.m_szGameDir, sizeof(details.m_szGameDir), "valve");
+        details.m_nAppID      = 70;
+        details.m_nPlayers    = players;
+        details.m_nMaxPlayers = 32;
+        details.m_bSecure     = true;
+        details.m_steamID     = CSteamID(uint64(90000000000000042));
+    }
+    // Queues an answer (MOCK_LIST_*) of the last server list request; value is the server index or
+    // the EMatchMakingServerResponse.
+    S_API void S_CALLTYPE MockHostServerListAnswer(int answer, int value)
+    {
+        auto response = matchmakingServers.lastList;
+        auto request  = matchmakingServers.lastRequest;
+        answers.push_back([=] {
+            if (!*static_cast<int*>(request)) return;
+            if (answer == MOCK_LIST_RESPONDED) response->ServerResponded(request, value);
+            else if (answer == MOCK_LIST_FAILED)
+                response->ServerFailedToRespond(request, value);
+            else
+                response->RefreshComplete(request, EMatchMakingServerResponse(value));
+        });
+    }
+    // Queues the answer of the last ping query: the server 0 details, or a failure.
+    S_API void S_CALLTYPE MockHostPingAnswer(int responded)
+    {
+        auto response = matchmakingServers.lastPing;
+        auto query    = matchmakingServers.lastQuery;
+        answers.push_back([=] {
+            if (!matchmakingServers.Answers(query)) return;
+            if (responded) response->ServerResponded(matchmakingServers.details);
+            else
+                response->ServerFailedToRespond();
+        });
+    }
+    // Queues an answer (MOCK_PLAYERS_*) of the last player query.
+    S_API void S_CALLTYPE MockHostPlayersAnswer(int answer)
+    {
+        auto response = matchmakingServers.lastPlayers;
+        auto query    = matchmakingServers.lastQuery;
+        answers.push_back([=] {
+            if (!matchmakingServers.Answers(query)) return;
+            if (answer == MOCK_PLAYERS_PLAYER) response->AddPlayerToList("player", 3, 1.5f);
+            else if (answer == MOCK_PLAYERS_FAILED)
+                response->PlayersFailedToRespond();
+            else
+                response->PlayersRefreshComplete();
+        });
     }
     S_API int S_CALLTYPE MockHostStat(int which)
     {

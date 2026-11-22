@@ -1,7 +1,7 @@
 #pragma once
-// Empty implementations of every SteamUser023, SteamApps009, SteamGameServer015, SteamNetworkingSockets013
-// and SteamNetworkingUtils004 method, generated from the Steamworks SDK v1.65 declarations. Mocks
-// override the methods they exercise.
+// Empty implementations of every SteamUser023, SteamApps009, SteamGameServer015, SteamNetworkingSockets013,
+// SteamNetworkingUtils004, SteamMatchMaking009, SteamMatchMakingServers003 and SteamFriends018 method,
+// generated from the Steamworks SDK v1.65 declarations. Mocks override the methods they exercise.
 #include <steam/steam_api.h>
 #include <steam/steam_gameserver.h>
 
@@ -208,4 +208,150 @@ public:
     ESteamNetworkingFakeIPType           SteamNetworkingIPAddr_GetFakeIPType(const SteamNetworkingIPAddr& addr) override { return {}; }
     void                                 SteamNetworkingIdentity_ToString(const SteamNetworkingIdentity& identity, char* buf, size_t cbBuf) override {}
     bool                                 SteamNetworkingIdentity_ParseString(SteamNetworkingIdentity* pIdentity, const char* pszStr) override { return {}; }
+};
+class StubMatchmaking : public ISteamMatchmaking
+{
+public:
+    int            GetFavoriteGameCount() override { return {}; }
+    bool           GetFavoriteGame(int iGame, AppId_t* pnAppID, uint32* pnIP, uint16* pnConnPort, uint16* pnQueryPort, uint32* punFlags, uint32* pRTime32LastPlayedOnServer) override { return {}; }
+    int            AddFavoriteGame(AppId_t nAppID, uint32 nIP, uint16 nConnPort, uint16 nQueryPort, uint32 unFlags, uint32 rTime32LastPlayedOnServer) override { return {}; }
+    bool           RemoveFavoriteGame(AppId_t nAppID, uint32 nIP, uint16 nConnPort, uint16 nQueryPort, uint32 unFlags) override { return {}; }
+    SteamAPICall_t RequestLobbyList() override { return {}; }
+    void           AddRequestLobbyListStringFilter(const char* pchKeyToMatch, const char* pchValueToMatch, ELobbyComparison eComparisonType) override {}
+    void           AddRequestLobbyListNumericalFilter(const char* pchKeyToMatch, int nValueToMatch, ELobbyComparison eComparisonType) override {}
+    void           AddRequestLobbyListNearValueFilter(const char* pchKeyToMatch, int nValueToBeCloseTo) override {}
+    void           AddRequestLobbyListFilterSlotsAvailable(int nSlotsAvailable) override {}
+    void           AddRequestLobbyListDistanceFilter(ELobbyDistanceFilter eLobbyDistanceFilter) override {}
+    void           AddRequestLobbyListResultCountFilter(int cMaxResults) override {}
+    void           AddRequestLobbyListCompatibleMembersFilter(CSteamID steamIDLobby) override {}
+    CSteamID       GetLobbyByIndex(int iLobby) override { return {}; }
+    SteamAPICall_t CreateLobby(ELobbyType eLobbyType, int cMaxMembers) override { return {}; }
+    SteamAPICall_t JoinLobby(CSteamID steamIDLobby) override { return {}; }
+    void           LeaveLobby(CSteamID steamIDLobby) override {}
+    bool           InviteUserToLobby(CSteamID steamIDLobby, CSteamID steamIDInvitee) override { return {}; }
+    int            GetNumLobbyMembers(CSteamID steamIDLobby) override { return {}; }
+    CSteamID       GetLobbyMemberByIndex(CSteamID steamIDLobby, int iMember) override { return {}; }
+    const char*    GetLobbyData(CSteamID steamIDLobby, const char* pchKey) override { return {}; }
+    bool           SetLobbyData(CSteamID steamIDLobby, const char* pchKey, const char* pchValue) override { return {}; }
+    int            GetLobbyDataCount(CSteamID steamIDLobby) override { return {}; }
+    bool           GetLobbyDataByIndex(CSteamID steamIDLobby, int iLobbyData, char* pchKey, int cchKeyBufferSize, char* pchValue, int cchValueBufferSize) override { return {}; }
+    bool           DeleteLobbyData(CSteamID steamIDLobby, const char* pchKey) override { return {}; }
+    const char*    GetLobbyMemberData(CSteamID steamIDLobby, CSteamID steamIDUser, const char* pchKey) override { return {}; }
+    void           SetLobbyMemberData(CSteamID steamIDLobby, const char* pchKey, const char* pchValue) override {}
+    bool           SendLobbyChatMsg(CSteamID steamIDLobby, const void* pvMsgBody, int cubMsgBody) override { return {}; }
+    int            GetLobbyChatEntry(CSteamID steamIDLobby, int iChatID, CSteamID* pSteamIDUser, void* pvData, int cubData, EChatEntryType* peChatEntryType) override { return {}; }
+    bool           RequestLobbyData(CSteamID steamIDLobby) override { return {}; }
+    void           SetLobbyGameServer(CSteamID steamIDLobby, uint32 unGameServerIP, uint16 unGameServerPort, CSteamID steamIDGameServer) override {}
+    bool           GetLobbyGameServer(CSteamID steamIDLobby, uint32* punGameServerIP, uint16* punGameServerPort, CSteamID* psteamIDGameServer) override { return {}; }
+    bool           SetLobbyMemberLimit(CSteamID steamIDLobby, int cMaxMembers) override { return {}; }
+    int            GetLobbyMemberLimit(CSteamID steamIDLobby) override { return {}; }
+    bool           SetLobbyType(CSteamID steamIDLobby, ELobbyType eLobbyType) override { return {}; }
+    bool           SetLobbyJoinable(CSteamID steamIDLobby, bool bLobbyJoinable) override { return {}; }
+    CSteamID       GetLobbyOwner(CSteamID steamIDLobby) override { return {}; }
+    bool           SetLobbyOwner(CSteamID steamIDLobby, CSteamID steamIDNewOwner) override { return {}; }
+    bool           SetLinkedLobby(CSteamID steamIDLobby, CSteamID steamIDLobbyDependent) override { return {}; }
+};
+class StubMatchmakingServers : public ISteamMatchmakingServers
+{
+public:
+    HServerListRequest RequestInternetServerList(AppId_t iApp, MatchMakingKeyValuePair_t** ppchFilters, uint32 nFilters, ISteamMatchmakingServerListResponse* pRequestServersResponse) override { return {}; }
+    HServerListRequest RequestLANServerList(AppId_t iApp, ISteamMatchmakingServerListResponse* pRequestServersResponse) override { return {}; }
+    HServerListRequest RequestFriendsServerList(AppId_t iApp, MatchMakingKeyValuePair_t** ppchFilters, uint32 nFilters, ISteamMatchmakingServerListResponse* pRequestServersResponse) override { return {}; }
+    HServerListRequest RequestFavoritesServerList(AppId_t iApp, MatchMakingKeyValuePair_t** ppchFilters, uint32 nFilters, ISteamMatchmakingServerListResponse* pRequestServersResponse) override { return {}; }
+    HServerListRequest RequestHistoryServerList(AppId_t iApp, MatchMakingKeyValuePair_t** ppchFilters, uint32 nFilters, ISteamMatchmakingServerListResponse* pRequestServersResponse) override { return {}; }
+    HServerListRequest RequestSpectatorServerList(AppId_t iApp, MatchMakingKeyValuePair_t** ppchFilters, uint32 nFilters, ISteamMatchmakingServerListResponse* pRequestServersResponse) override { return {}; }
+    void               ReleaseRequest(HServerListRequest hServerListRequest) override {}
+    gameserveritem_t*  GetServerDetails(HServerListRequest hRequest, int iServer) override { return {}; }
+    void               CancelQuery(HServerListRequest hRequest) override {}
+    void               RefreshQuery(HServerListRequest hRequest) override {}
+    bool               IsRefreshing(HServerListRequest hRequest) override { return {}; }
+    int                GetServerCount(HServerListRequest hRequest) override { return {}; }
+    void               RefreshServer(HServerListRequest hRequest, int iServer) override {}
+    HServerQuery       PingServer(uint32 unIP, uint16 usPort, ISteamMatchmakingPingResponse* pRequestServersResponse) override { return {}; }
+    HServerQuery       PlayerDetails(uint32 unIP, uint16 usPort, ISteamMatchmakingPlayersResponse* pRequestServersResponse) override { return {}; }
+    HServerQuery       ServerRules(uint32 unIP, uint16 usPort, ISteamMatchmakingRulesResponse* pRequestServersResponse) override { return {}; }
+    HServerQuery       ServerFriends(uint32 unIP, uint16 usPort, ISteamMatchmakingServerFriendsResponse* pRequestServersResponse) override { return {}; }
+    void               CancelServerQuery(HServerQuery hServerQuery) override {}
+};
+class StubFriends : public ISteamFriends
+{
+public:
+    const char*         GetPersonaName() override { return {}; }
+    EPersonaState       GetPersonaState() override { return {}; }
+    int                 GetFriendCount(int iFriendFlags) override { return {}; }
+    CSteamID            GetFriendByIndex(int iFriend, int iFriendFlags) override { return {}; }
+    EFriendRelationship GetFriendRelationship(CSteamID steamIDFriend) override { return {}; }
+    EPersonaState       GetFriendPersonaState(CSteamID steamIDFriend) override { return {}; }
+    const char*         GetFriendPersonaName(CSteamID steamIDFriend) override { return {}; }
+    bool                GetFriendGamePlayed(CSteamID steamIDFriend, FriendGameInfo_t* pFriendGameInfo) override { return {}; }
+    const char*         GetFriendPersonaNameHistory(CSteamID steamIDFriend, int iPersonaName) override { return {}; }
+    int                 GetFriendSteamLevel(CSteamID steamIDFriend) override { return {}; }
+    const char*         GetPlayerNickname(CSteamID steamIDPlayer) override { return {}; }
+    int                 GetFriendsGroupCount() override { return {}; }
+    FriendsGroupID_t    GetFriendsGroupIDByIndex(int iFG) override { return {}; }
+    const char*         GetFriendsGroupName(FriendsGroupID_t friendsGroupID) override { return {}; }
+    int                 GetFriendsGroupMembersCount(FriendsGroupID_t friendsGroupID) override { return {}; }
+    void                GetFriendsGroupMembersList(FriendsGroupID_t friendsGroupID, CSteamID* pOutSteamIDMembers, int nMembersCount) override {}
+    bool                HasFriend(CSteamID steamIDFriend, int iFriendFlags) override { return {}; }
+    int                 GetClanCount() override { return {}; }
+    CSteamID            GetClanByIndex(int iClan) override { return {}; }
+    const char*         GetClanName(CSteamID steamIDClan) override { return {}; }
+    const char*         GetClanTag(CSteamID steamIDClan) override { return {}; }
+    bool                GetClanActivityCounts(CSteamID steamIDClan, int* pnOnline, int* pnInGame, int* pnChatting) override { return {}; }
+    SteamAPICall_t      DownloadClanActivityCounts(CSteamID* psteamIDClans, int cClansToRequest) override { return {}; }
+    int                 GetFriendCountFromSource(CSteamID steamIDSource) override { return {}; }
+    CSteamID            GetFriendFromSourceByIndex(CSteamID steamIDSource, int iFriend) override { return {}; }
+    bool                IsUserInSource(CSteamID steamIDUser, CSteamID steamIDSource) override { return {}; }
+    void                SetInGameVoiceSpeaking(CSteamID steamIDUser, bool bSpeaking) override {}
+    void                ActivateGameOverlay(const char* pchDialog) override {}
+    void                ActivateGameOverlayToUser(const char* pchDialog, CSteamID steamID) override {}
+    void                ActivateGameOverlayToWebPage(const char* pchURL, EActivateGameOverlayToWebPageMode eMode = k_EActivateGameOverlayToWebPageMode_Default) override {}
+    void                ActivateGameOverlayToStore(AppId_t nAppID, EOverlayToStoreFlag eFlag) override {}
+    void                SetPlayedWith(CSteamID steamIDUserPlayedWith) override {}
+    void                ActivateGameOverlayInviteDialog(CSteamID steamIDLobby) override {}
+    int                 GetSmallFriendAvatar(CSteamID steamIDFriend) override { return {}; }
+    int                 GetMediumFriendAvatar(CSteamID steamIDFriend) override { return {}; }
+    int                 GetLargeFriendAvatar(CSteamID steamIDFriend) override { return {}; }
+    bool                RequestUserInformation(CSteamID steamIDUser, bool bRequireNameOnly) override { return {}; }
+    SteamAPICall_t      RequestClanOfficerList(CSteamID steamIDClan) override { return {}; }
+    CSteamID            GetClanOwner(CSteamID steamIDClan) override { return {}; }
+    int                 GetClanOfficerCount(CSteamID steamIDClan) override { return {}; }
+    CSteamID            GetClanOfficerByIndex(CSteamID steamIDClan, int iOfficer) override { return {}; }
+    bool                SetRichPresence(const char* pchKey, const char* pchValue) override { return {}; }
+    void                ClearRichPresence() override {}
+    const char*         GetFriendRichPresence(CSteamID steamIDFriend, const char* pchKey) override { return {}; }
+    int                 GetFriendRichPresenceKeyCount(CSteamID steamIDFriend) override { return {}; }
+    const char*         GetFriendRichPresenceKeyByIndex(CSteamID steamIDFriend, int iKey) override { return {}; }
+    void                RequestFriendRichPresence(CSteamID steamIDFriend) override {}
+    bool                InviteUserToGame(CSteamID steamIDFriend, const char* pchConnectString) override { return {}; }
+    int                 GetCoplayFriendCount() override { return {}; }
+    CSteamID            GetCoplayFriend(int iCoplayFriend) override { return {}; }
+    int                 GetFriendCoplayTime(CSteamID steamIDFriend) override { return {}; }
+    AppId_t             GetFriendCoplayGame(CSteamID steamIDFriend) override { return {}; }
+    SteamAPICall_t      JoinClanChatRoom(CSteamID steamIDClan) override { return {}; }
+    bool                LeaveClanChatRoom(CSteamID steamIDClan) override { return {}; }
+    int                 GetClanChatMemberCount(CSteamID steamIDClan) override { return {}; }
+    CSteamID            GetChatMemberByIndex(CSteamID steamIDClan, int iUser) override { return {}; }
+    bool                SendClanChatMessage(CSteamID steamIDClanChat, const char* pchText) override { return {}; }
+    int                 GetClanChatMessage(CSteamID steamIDClanChat, int iMessage, void* prgchText, int cchTextMax, EChatEntryType* peChatEntryType, CSteamID* psteamidChatter) override { return {}; }
+    bool                IsClanChatAdmin(CSteamID steamIDClanChat, CSteamID steamIDUser) override { return {}; }
+    bool                IsClanChatWindowOpenInSteam(CSteamID steamIDClanChat) override { return {}; }
+    bool                OpenClanChatWindowInSteam(CSteamID steamIDClanChat) override { return {}; }
+    bool                CloseClanChatWindowInSteam(CSteamID steamIDClanChat) override { return {}; }
+    bool                SetListenForFriendsMessages(bool bInterceptEnabled) override { return {}; }
+    bool                ReplyToFriendMessage(CSteamID steamIDFriend, const char* pchMsgToSend) override { return {}; }
+    int                 GetFriendMessage(CSteamID steamIDFriend, int iMessageID, void* pvData, int cubData, EChatEntryType* peChatEntryType) override { return {}; }
+    SteamAPICall_t      GetFollowerCount(CSteamID steamID) override { return {}; }
+    SteamAPICall_t      IsFollowing(CSteamID steamID) override { return {}; }
+    SteamAPICall_t      EnumerateFollowingList(uint32 unStartIndex) override { return {}; }
+    bool                IsClanPublic(CSteamID steamIDClan) override { return {}; }
+    bool                IsClanOfficialGameGroup(CSteamID steamIDClan) override { return {}; }
+    int                 GetNumChatsWithUnreadPriorityMessages() override { return {}; }
+    void                ActivateGameOverlayRemotePlayTogetherInviteDialog(CSteamID steamIDLobby) override {}
+    bool                RegisterProtocolInOverlayBrowser(const char* pchProtocol) override { return {}; }
+    void                ActivateGameOverlayInviteDialogConnectString(const char* pchConnectString) override {}
+    SteamAPICall_t      RequestEquippedProfileItems(CSteamID steamID) override { return {}; }
+    bool                BHasEquippedProfileItem(CSteamID steamID, ECommunityProfileItemType itemType) override { return {}; }
+    const char*         GetProfileItemPropertyString(CSteamID steamID, ECommunityProfileItemType itemType, ECommunityProfileItemProperty prop) override { return {}; }
+    uint32              GetProfileItemPropertyUint(CSteamID steamID, ECommunityProfileItemType itemType, ECommunityProfileItemProperty prop) override { return {}; }
 };

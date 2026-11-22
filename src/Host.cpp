@@ -15,6 +15,17 @@ struct SteamBridgeFakeUDPPort
     ISteamNetworkingFakeUDPPort* port;
     bool                         gameServer;
 };
+// The object behind a public server list handle; Steam answers it until it is released.
+struct SteamBridgeServerList final : ISteamMatchmakingServerListResponse
+{
+    HServerListRequest         native{};
+    SteamBridgeServersCallback callback{};
+    void*                      user{};
+    bool                       released{};
+    void                       ServerResponded(HServerListRequest request, int index) override;
+    void                       ServerFailedToRespond(HServerListRequest request, int index) override;
+    void                       RefreshComplete(HServerListRequest request, EMatchMakingServerResponse response) override;
+};
 
 namespace
 {
@@ -32,27 +43,52 @@ constexpr char GameServerInterfaceVersions[] =
     STEAMUTILS_INTERFACE_VERSION "\0" STEAMNETWORKINGUTILS_INTERFACE_VERSION "\0" STEAMGAMESERVER_INTERFACE_VERSION "\0" STEAMGAMESERVERSTATS_INTERFACE_VERSION "\0" STEAMHTTP_INTERFACE_VERSION "\0" STEAMINVENTORY_INTERFACE_VERSION "\0" STEAMNETWORKING_INTERFACE_VERSION "\0" STEAMNETWORKINGMESSAGES_INTERFACE_VERSION "\0" STEAMNETWORKINGSOCKETS_INTERFACE_VERSION "\0" STEAMUGC_INTERFACE_VERSION "\0"
                                  "\0";
 
+// A ping or player query; Steam answers it until it ends or is cancelled.
+struct ServerQuery final : ISteamMatchmakingPingResponse, ISteamMatchmakingPlayersResponse
+{
+    uint32_t                   id{};
+    HServerQuery               native = HSERVERQUERY_INVALID;
+    SteamBridgeServersCallback callback{};
+    void*                      user{};
+    // ended: no more events. cancelled: Steam still has to cancel the native query.
+    bool ended{}, cancelled{};
+    void ServerResponded(gameserveritem_t& server) override;
+    void ServerFailedToRespond() override;
+    void AddPlayerToList(const char* name, int score, float seconds) override;
+    void PlayersFailedToRespond() override;
+    void PlayersRefreshComplete() override;
+    void Dispatch(uint32_t kind, SteamBridgeServersEvent& event, bool end);
+};
+
 struct HostCallback;
 struct Host
 {
-    platform::Module                           module{};
-    InitFlatFn                                 initFlat{};
-    VoidFn                                     shutdown{}, runCallbacks{}, serverShutdown{}, serverRunCallbacks{};
-    GetUserFn                                  getUser{}, serverGetUser{};
-    FindInterfaceFn                            findUser{}, findServer{};
-    GameServerInitFn                           serverInit{};
-    RegisterCallbackFn                         registerCallback{};
-    UnregisterFn                               unregisterCallback{};
-    ISteamUser*                                user{};
-    ISteamFriends*                             friends{};
-    ISteamApps*                                apps{};
-    ISteamGameServer*                          server{};
-    bool                                       client{};
-    SteamBridgeClientCallback                  clientFn{};
-    void*                                      clientUser{};
-    SteamBridgeServerCallback                  serverFn{};
-    void*                                      serverUser{};
-    std::vector<std::unique_ptr<HostCallback>> clientCallbacks, serverCallbacks;
+    platform::Module               module{};
+    InitFlatFn                     initFlat{};
+    VoidFn                         shutdown{}, runCallbacks{}, serverShutdown{}, serverRunCallbacks{};
+    GetUserFn                      getUser{}, serverGetUser{};
+    FindInterfaceFn                findUser{}, findServer{};
+    GameServerInitFn               serverInit{};
+    RegisterCallbackFn             registerCallback{};
+    UnregisterFn                   unregisterCallback{};
+    ISteamUser*                    user{};
+    ISteamFriends*                 friends{};
+    ISteamApps*                    apps{};
+    ISteamMatchmaking*             matchmaking{};
+    ISteamMatchmakingServers*      servers{};
+    ISteamGameServer*              server{};
+    bool                           client{};
+    SteamBridgeClientCallback      clientFn{};
+    void*                          clientUser{};
+    SteamBridgeMatchmakingCallback matchmakingFn{};
+    void*                          matchmakingUser{};
+    // Server list requests and server queries; released and ended ones are retired outside dispatch.
+    std::vector<std::unique_ptr<SteamBridgeServerList>> serverLists;
+    std::vector<std::unique_ptr<ServerQuery>>           serverQueries;
+    uint32_t                                            lastServerQuery{};
+    SteamBridgeServerCallback                           serverFn{};
+    void*                                               serverUser{};
+    std::vector<std::unique_ptr<HostCallback>>          clientCallbacks, serverCallbacks;
     // Shutdown requested by a host callback runs after the native dispatcher returns.
     unsigned dispatchDepth{};
     bool     pendingServerShutdown{}, pendingHostShutdown{};
@@ -86,8 +122,34 @@ struct HostCallback final : CCallbackBase
     {
         if (!payload) return;
         if (m_nCallbackFlags & k_ECallbackFlagsGameServer) RunServer(payload);
+        else if (m_iCallback == FavoritesListChanged_t::k_iCallback || m_iCallback == PersonaStateChange_t::k_iCallback)
+            RunMatchmaking(payload);
         else
             RunClient(payload);
+    }
+    void RunMatchmaking(void* payload)
+    {
+        SteamBridgeMatchmakingEvent event{};
+        if (m_iCallback == FavoritesListChanged_t::k_iCallback)
+        {
+            auto p               = static_cast<FavoritesListChanged_t*>(payload);
+            event.kind           = SB_MATCHMAKING_FAVORITES_CHANGED;
+            event.ip             = p->m_nIP;
+            event.queryPort      = p->m_nQueryPort;
+            event.connectionPort = p->m_nConnPort;
+            event.appID          = p->m_nAppID;
+            event.flags          = p->m_nFlags;
+            event.add            = p->m_bAdd;
+            event.accountID      = p->m_unAccountId;
+        }
+        else
+        {
+            auto p            = static_cast<PersonaStateChange_t*>(payload);
+            event.kind        = SB_MATCHMAKING_PERSONA_CHANGE;
+            event.steamID     = p->m_ulSteamID;
+            event.changeFlags = p->m_nChangeFlags;
+        }
+        Dispatch(host.matchmakingFn, host.matchmakingUser, &event);
     }
     void RunClient(void* payload)
     {
@@ -198,6 +260,21 @@ void DestroyPorts(bool gameServer)
         return true;
     });
 }
+// Releases the server lists and cancels the server queries that stopped answering, outside dispatch.
+void RetireServerQueries()
+{
+    if (host.dispatchDepth) return;
+    std::erase_if(host.serverLists, [](const std::unique_ptr<SteamBridgeServerList>& list) {
+        if (!list->released) return false;
+        host.servers->ReleaseRequest(list->native);
+        return true;
+    });
+    std::erase_if(host.serverQueries, [](const std::unique_ptr<ServerQuery>& query) {
+        if (!query->ended) return false;
+        if (query->cancelled) host.servers->CancelServerQuery(query->native);
+        return true;
+    });
+}
 void ShutdownServer()
 {
     if (!host.server) return;
@@ -217,18 +294,30 @@ void ShutdownHost()
     if (!host.module) return;
     ShutdownServer();
     DestroyPorts(false);
+    for (auto& list : host.serverLists)
+        list->released = true;
+    for (auto& query : host.serverQueries)
+    {
+        query->cancelled = query->cancelled || !query->ended;
+        query->ended     = true;
+    }
+    RetireServerQueries();
     Unregister(host.clientCallbacks);
     if (host.client) host.shutdown();
     platform::UnloadRuntime(host.module);
-    auto clientFn   = host.clientFn;
-    auto clientUser = host.clientUser;
-    auto serverFn   = host.serverFn;
-    auto serverUser = host.serverUser;
-    host            = Host{};
-    host.clientFn   = clientFn;
-    host.clientUser = clientUser;
-    host.serverFn   = serverFn;
-    host.serverUser = serverUser;
+    auto clientFn        = host.clientFn;
+    auto clientUser      = host.clientUser;
+    auto matchmakingFn   = host.matchmakingFn;
+    auto matchmakingUser = host.matchmakingUser;
+    auto serverFn        = host.serverFn;
+    auto serverUser      = host.serverUser;
+    host                 = Host{};
+    host.clientFn        = clientFn;
+    host.clientUser      = clientUser;
+    host.matchmakingFn   = matchmakingFn;
+    host.matchmakingUser = matchmakingUser;
+    host.serverFn        = serverFn;
+    host.serverUser      = serverUser;
 }
 void RunPendingShutdown()
 {
@@ -311,20 +400,26 @@ SteamBridgeStatus SteamBridge_HostInit(const char* runtimePath, uint32_t initial
             h.user               = static_cast<ISteamUser*>(h.findUser(steamUser, STEAMUSER_INTERFACE_VERSION));
             h.friends            = static_cast<ISteamFriends*>(h.findUser(steamUser, STEAMFRIENDS_INTERFACE_VERSION));
             h.apps               = static_cast<ISteamApps*>(h.findUser(steamUser, STEAMAPPS_INTERFACE_VERSION));
+            h.matchmaking        = static_cast<ISteamMatchmaking*>(h.findUser(steamUser, STEAMMATCHMAKING_INTERFACE_VERSION));
+            h.servers            = static_cast<ISteamMatchmakingServers*>(h.findUser(steamUser, STEAMMATCHMAKINGSERVERS_INTERFACE_VERSION));
             h.sockets            = static_cast<ISteamNetworkingSockets*>(h.findUser(steamUser, STEAMNETWORKINGSOCKETS_INTERFACE_VERSION));
             // The networking utilities are global, not per user (SteamNetworkingUtils_SteamAPI).
             h.utils = static_cast<ISteamNetworkingUtils*>(h.findUser(0, STEAMNETWORKINGUTILS_INTERFACE_VERSION));
         }
-        h.clientFn   = host.clientFn;
-        h.clientUser = host.clientUser;
-        h.serverFn   = host.serverFn;
-        h.serverUser = host.serverUser;
-        host         = std::move(h);
+        h.clientFn        = host.clientFn;
+        h.clientUser      = host.clientUser;
+        h.matchmakingFn   = host.matchmakingFn;
+        h.matchmakingUser = host.matchmakingUser;
+        h.serverFn        = host.serverFn;
+        h.serverUser      = host.serverUser;
+        host              = std::move(h);
         if (host.client)
         {
             Register<ClientGameServerDeny_t>(host.clientCallbacks, false);
             Register<GameServerChangeRequested_t>(host.clientCallbacks, false);
             Register<GameOverlayActivated_t>(host.clientCallbacks, false);
+            Register<FavoritesListChanged_t>(host.clientCallbacks, false);
+            Register<PersonaStateChange_t>(host.clientCallbacks, false);
         }
         return SB_OK;
     }
@@ -348,11 +443,17 @@ void     SteamBridge_HostRunCallbacks()
     host.runCallbacks();
     --host.dispatchDepth;
     RunPendingShutdown();
+    RetireServerQueries();
 }
 void SteamBridge_HostSetClientCallback(SteamBridgeClientCallback callback, void* user)
 {
     host.clientFn   = callback;
     host.clientUser = user;
+}
+void SteamBridge_HostSetMatchmakingCallback(SteamBridgeMatchmakingCallback callback, void* user)
+{
+    host.matchmakingFn   = callback;
+    host.matchmakingUser = user;
 }
 
 SteamBridgeStatus SteamBridge_UserInitiateGameConnection(void* ticket, uint32_t capacity, uint64_t serverSteamID, uint32_t serverIP, uint16_t serverPort, uint32_t secure, uint32_t* size)
@@ -740,5 +841,304 @@ SteamBridgeStatus SteamBridge_NetworkingSetDebugOutput(int32_t level, SteamBridg
     if (!host.utils) return SB_UNAVAILABLE;
     networkingDebugOutput = callback;
     host.utils->SetDebugOutputFunction(callback ? ESteamNetworkingSocketsDebugOutputType(level) : k_ESteamNetworkingSocketsDebugOutputType_None, callback ? NetworkingDebugOutput : nullptr);
+    return SB_OK;
+}
+
+namespace
+{
+void CopyServer(SteamBridgeServerItem& item, const gameserveritem_t& server)
+{
+    item                       = {};
+    item.ip                    = server.m_NetAdr.GetIP();
+    item.queryPort             = server.m_NetAdr.GetQueryPort();
+    item.connectionPort        = server.m_NetAdr.GetConnectionPort();
+    item.ping                  = server.m_nPing;
+    item.hadSuccessfulResponse = server.m_bHadSuccessfulResponse;
+    item.doNotRefresh          = server.m_bDoNotRefresh;
+    item.appID                 = server.m_nAppID;
+    item.players               = server.m_nPlayers;
+    item.maxPlayers            = server.m_nMaxPlayers;
+    item.botPlayers            = server.m_nBotPlayers;
+    item.password              = server.m_bPassword;
+    item.secure                = server.m_bSecure;
+    item.timeLastPlayed        = server.m_ulTimeLastPlayed;
+    item.serverVersion         = server.m_nServerVersion;
+    item.steamID               = server.m_steamID.ConvertToUint64();
+    CopyText(item.name, server.GetName());
+    CopyText(item.gameDir, server.m_szGameDir);
+    CopyText(item.map, server.m_szMap);
+    CopyText(item.description, server.m_szGameDescription);
+    CopyText(item.tags, server.m_szGameTags);
+}
+// The handle when it names a request that has not been released.
+SteamBridgeServerList* FindServerList(SteamBridgeServerListHandle request)
+{
+    auto found = std::find_if(host.serverLists.begin(), host.serverLists.end(), [&](const std::unique_ptr<SteamBridgeServerList>& owned) { return owned.get() == request; });
+    return found != host.serverLists.end() && !(*found)->released ? found->get() : nullptr;
+}
+template <class F> SteamBridgeStatus ServerList(SteamBridgeServerListHandle request, F&& fn)
+{
+    SteamBridgeServerList* list = FindServerList(request);
+    if (!list) return SB_INVALID_ARGUMENT;
+    fn(*host.servers, list->native);
+    return SB_OK;
+}
+void EraseServerList(SteamBridgeServerList* list)
+{
+    std::erase_if(host.serverLists, [&](const std::unique_ptr<SteamBridgeServerList>& owned) { return owned.get() == list; });
+}
+void ListEvent(SteamBridgeServerList& list, HServerListRequest native, SteamBridgeServersEvent& event)
+{
+    if (list.released) return;
+    // Steam may answer before the request call returns its handle.
+    if (!list.native) list.native = native;
+    event.request = &list;
+    HostCallback::Dispatch(list.callback, list.user, &event);
+}
+template <class Start> SteamBridgeStatus StartServerQuery(SteamBridgeServersCallback callback, void* user, uint32_t* query, Start&& start)
+{
+    if (!query) return SB_INVALID_ARGUMENT;
+    *query = 0;
+    if (!callback) return SB_INVALID_ARGUMENT;
+    if (!host.servers) return SB_UNAVAILABLE;
+    ServerQuery* owned{};
+    try
+    {
+        host.serverQueries.push_back(std::make_unique<ServerQuery>());
+        owned = host.serverQueries.back().get();
+    }
+    catch (...)
+    {
+        return SB_FAILED;
+    }
+    // Zero is never a query.
+    if (!++host.lastServerQuery) ++host.lastServerQuery;
+    owned->id       = host.lastServerQuery;
+    owned->callback = callback;
+    owned->user     = user;
+    owned->native   = start(*owned);
+    if (owned->native == HSERVERQUERY_INVALID)
+    {
+        // A query that never started has nothing to cancel.
+        owned->ended = true;
+        RetireServerQueries();
+        return SB_FAILED;
+    }
+    *query = owned->id;
+    return SB_OK;
+}
+} // namespace
+
+void SteamBridgeServerList::ServerResponded(HServerListRequest request, int index)
+{
+    SteamBridgeServersEvent event{};
+    event.kind  = SB_SERVERS_LIST_RESPONDED;
+    event.index = index;
+    ListEvent(*this, request, event);
+}
+void SteamBridgeServerList::ServerFailedToRespond(HServerListRequest request, int index)
+{
+    SteamBridgeServersEvent event{};
+    event.kind  = SB_SERVERS_LIST_FAILED;
+    event.index = index;
+    ListEvent(*this, request, event);
+}
+void SteamBridgeServerList::RefreshComplete(HServerListRequest request, EMatchMakingServerResponse response)
+{
+    SteamBridgeServersEvent event{};
+    event.kind     = SB_SERVERS_LIST_COMPLETE;
+    event.response = response;
+    ListEvent(*this, request, event);
+}
+void ServerQuery::Dispatch(uint32_t kind, SteamBridgeServersEvent& event, bool end)
+{
+    if (ended) return;
+    // Steam forgets a query after its final answer, so it must not be cancelled later.
+    ended       = end;
+    event.kind  = kind;
+    event.query = id;
+    HostCallback::Dispatch(callback, user, &event);
+}
+void ServerQuery::ServerResponded(gameserveritem_t& server)
+{
+    SteamBridgeServersEvent event{};
+    CopyServer(event.server, server);
+    Dispatch(SB_SERVERS_PING_RESPONDED, event, true);
+}
+void ServerQuery::ServerFailedToRespond()
+{
+    SteamBridgeServersEvent event{};
+    Dispatch(SB_SERVERS_PING_FAILED, event, true);
+}
+void ServerQuery::AddPlayerToList(const char* name, int score, float seconds)
+{
+    SteamBridgeServersEvent event{};
+    CopyText(event.player, name ? name : "");
+    event.score   = score;
+    event.seconds = seconds;
+    Dispatch(SB_SERVERS_PLAYER, event, false);
+}
+void ServerQuery::PlayersFailedToRespond()
+{
+    SteamBridgeServersEvent event{};
+    Dispatch(SB_SERVERS_PLAYERS_FAILED, event, true);
+}
+void ServerQuery::PlayersRefreshComplete()
+{
+    SteamBridgeServersEvent event{};
+    Dispatch(SB_SERVERS_PLAYERS_COMPLETE, event, true);
+}
+
+SteamBridgeStatus SteamBridge_ServersRequestList(int32_t kind, uint32_t appID, const SteamBridgeServerFilter* filters, uint32_t filterCount, SteamBridgeServersCallback callback, void* user, SteamBridgeServerListHandle* request)
+{
+    if (!request) return SB_INVALID_ARGUMENT;
+    *request = nullptr;
+    if (kind < SB_SERVER_LIST_INTERNET || kind > SB_SERVER_LIST_SPECTATOR || !callback || (filterCount && !filters)) return SB_INVALID_ARGUMENT;
+    for (uint32_t i = 0; i < filterCount; ++i)
+        if (!filters[i].key || !filters[i].value) return SB_INVALID_ARGUMENT;
+    if (!host.servers) return SB_UNAVAILABLE;
+    SteamBridgeServerList*                 list{};
+    std::vector<MatchMakingKeyValuePair_t> pairs;
+    try
+    {
+        pairs.reserve(filterCount);
+        for (uint32_t i = 0; i < filterCount; ++i)
+            pairs.emplace_back(filters[i].key, filters[i].value);
+        host.serverLists.push_back(std::make_unique<SteamBridgeServerList>());
+    }
+    catch (...)
+    {
+        return SB_FAILED;
+    }
+    list           = host.serverLists.back().get();
+    list->callback = callback;
+    list->user     = user;
+    // Steam reads the filters as an array through the pointer that ppchFilters points to.
+    MatchMakingKeyValuePair_t* first   = pairs.data();
+    uint32                     count   = uint32(pairs.size());
+    ISteamMatchmakingServers&  servers = *host.servers;
+    HServerListRequest         native{};
+    switch (kind)
+    {
+        case SB_SERVER_LIST_INTERNET: native = servers.RequestInternetServerList(appID, &first, count, list); break;
+        case SB_SERVER_LIST_LAN: native = servers.RequestLANServerList(appID, list); break;
+        case SB_SERVER_LIST_FRIENDS: native = servers.RequestFriendsServerList(appID, &first, count, list); break;
+        case SB_SERVER_LIST_FAVORITES: native = servers.RequestFavoritesServerList(appID, &first, count, list); break;
+        case SB_SERVER_LIST_HISTORY: native = servers.RequestHistoryServerList(appID, &first, count, list); break;
+        default: native = servers.RequestSpectatorServerList(appID, &first, count, list); break;
+    }
+    if (!native)
+    {
+        EraseServerList(list);
+        return SB_FAILED;
+    }
+    list->native = native;
+    *request     = list;
+    return SB_OK;
+}
+void SteamBridge_ServersReleaseRequest(SteamBridgeServerListHandle request)
+{
+    SteamBridgeServerList* list = FindServerList(request);
+    if (!list) return;
+    list->released = true;
+    RetireServerQueries();
+}
+SteamBridgeStatus SteamBridge_ServersGetDetails(SteamBridgeServerListHandle request, int32_t index, SteamBridgeServerItem* server)
+{
+    if (!server) return SB_INVALID_ARGUMENT;
+    *server                     = {};
+    SteamBridgeServerList* list = FindServerList(request);
+    if (!list) return SB_INVALID_ARGUMENT;
+    gameserveritem_t* details = host.servers->GetServerDetails(list->native, index);
+    if (!details) return SB_FAILED;
+    CopyServer(*server, *details);
+    return SB_OK;
+}
+SteamBridgeStatus SteamBridge_ServersCancelQuery(SteamBridgeServerListHandle request)
+{
+    return ServerList(request, [](ISteamMatchmakingServers& servers, HServerListRequest native) { servers.CancelQuery(native); });
+}
+SteamBridgeStatus SteamBridge_ServersRefreshQuery(SteamBridgeServerListHandle request)
+{
+    return ServerList(request, [](ISteamMatchmakingServers& servers, HServerListRequest native) { servers.RefreshQuery(native); });
+}
+SteamBridgeStatus SteamBridge_ServersRefreshServer(SteamBridgeServerListHandle request, int32_t index)
+{
+    return ServerList(request, [&](ISteamMatchmakingServers& servers, HServerListRequest native) { servers.RefreshServer(native, index); });
+}
+SteamBridgeStatus SteamBridge_ServersIsRefreshing(SteamBridgeServerListHandle request, uint32_t* refreshing)
+{
+    if (!refreshing) return SB_INVALID_ARGUMENT;
+    *refreshing = 0;
+    return ServerList(request, [&](ISteamMatchmakingServers& servers, HServerListRequest native) { *refreshing = servers.IsRefreshing(native); });
+}
+SteamBridgeStatus SteamBridge_ServersPing(uint32_t ip, uint16_t port, SteamBridgeServersCallback callback, void* user, uint32_t* query)
+{
+    return StartServerQuery(callback, user, query, [&](ServerQuery& owned) { return host.servers->PingServer(ip, port, &owned); });
+}
+SteamBridgeStatus SteamBridge_ServersPlayerDetails(uint32_t ip, uint16_t port, SteamBridgeServersCallback callback, void* user, uint32_t* query)
+{
+    return StartServerQuery(callback, user, query, [&](ServerQuery& owned) { return host.servers->PlayerDetails(ip, port, &owned); });
+}
+void SteamBridge_ServersCancelServerQuery(uint32_t query)
+{
+    auto found = std::find_if(host.serverQueries.begin(), host.serverQueries.end(), [&](const std::unique_ptr<ServerQuery>& owned) { return owned->id == query; });
+    if (!query || found == host.serverQueries.end() || (*found)->ended) return;
+    (*found)->ended     = true;
+    (*found)->cancelled = true;
+    RetireServerQueries();
+}
+
+SteamBridgeStatus SteamBridge_MatchmakingGetFavoriteCount(uint32_t* count)
+{
+    if (!count) return SB_INVALID_ARGUMENT;
+    *count = 0;
+    if (!host.matchmaking) return SB_UNAVAILABLE;
+    int favorites = host.matchmaking->GetFavoriteGameCount();
+    *count        = favorites > 0 ? uint32_t(favorites) : 0;
+    return SB_OK;
+}
+SteamBridgeStatus SteamBridge_MatchmakingAddFavorite(uint32_t appID, uint32_t ip, uint16_t connectionPort, uint16_t queryPort, uint32_t flags, uint32_t lastPlayed)
+{
+    if (!host.matchmaking) return SB_UNAVAILABLE;
+    host.matchmaking->AddFavoriteGame(appID, ip, connectionPort, queryPort, flags, lastPlayed);
+    return SB_OK;
+}
+SteamBridgeStatus SteamBridge_MatchmakingRemoveFavorite(uint32_t appID, uint32_t ip, uint16_t connectionPort, uint16_t queryPort, uint32_t flags)
+{
+    if (!host.matchmaking) return SB_UNAVAILABLE;
+    return Result(host.matchmaking->RemoveFavoriteGame(appID, ip, connectionPort, queryPort, flags));
+}
+
+SteamBridgeStatus SteamBridge_FriendsGetPersonaName(uint64_t steamID, char* name, uint32_t capacity)
+{
+    if (!name || !capacity) return SB_INVALID_ARGUMENT;
+    name[0] = 0;
+    if (!host.friends) return SB_UNAVAILABLE;
+    const char* persona = host.friends->GetFriendPersonaName(CSteamID(uint64(steamID)));
+    if (!persona) return SB_FAILED;
+    CopyText(name, capacity, persona);
+    return SB_OK;
+}
+SteamBridgeStatus SteamBridge_FriendsGetGamePlayed(uint64_t steamID, SteamBridgeFriendGame* game)
+{
+    if (!game) return SB_INVALID_ARGUMENT;
+    *game = {};
+    if (!host.friends) return SB_UNAVAILABLE;
+    FriendGameInfo_t info{};
+    if (!host.friends->GetFriendGamePlayed(CSteamID(uint64(steamID)), &info)) return SB_FAILED;
+    game->gameID       = info.m_gameID.ToUint64();
+    game->ip           = info.m_unGameIP;
+    game->gamePort     = info.m_usGamePort;
+    game->queryPort    = info.m_usQueryPort;
+    game->lobbySteamID = info.m_steamIDLobby.ConvertToUint64();
+    return SB_OK;
+}
+SteamBridgeStatus SteamBridge_AppsIsVACBanned(uint32_t* banned)
+{
+    if (!banned) return SB_INVALID_ARGUMENT;
+    *banned = 0;
+    if (!host.apps) return SB_UNAVAILABLE;
+    *banned = host.apps->BIsVACBanned();
     return SB_OK;
 }
