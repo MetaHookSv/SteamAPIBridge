@@ -14,6 +14,7 @@ using QueueFn     = void(S_CALLTYPE*)(int, int, const void*, int);
 using QueueFakeFn = void(S_CALLTYPE*)(int, uint32_t, uint16_t, int);
 using SetFakeIPFn = void(S_CALLTYPE*)(int, uint32_t, uint16_t);
 using EmitDebugFn = int(S_CALLTYPE*)(int, const char*);
+using SetAppsFn   = void(S_CALLTYPE*)(int, const char*, int);
 namespace mock
 {
 SetIntFn    failInit, voiceResult;
@@ -23,6 +24,7 @@ QueueFn     queue;
 QueueFakeFn queueFake;
 SetFakeIPFn setFakeIP;
 EmitDebugFn emitDebug;
+SetAppsFn   setApps;
 } // namespace mock
 using namespace mock;
 
@@ -79,6 +81,12 @@ void Unavailable(const char* missing)
     assert(0 == size);
     assert(SB_UNAVAILABLE == SteamBridge_ServerInit(0, 27015, 27015, SB_SERVER_MODE_SECURE, "1.0"));
     assert(0 == SteamBridge_VoiceGetOptimalSampleRate());
+    char language[8] = "x";
+    assert(SB_UNAVAILABLE == SteamBridge_UserGetCurrentGameLanguage(language, sizeof(language)));
+    assert(0 == language[0]);
+    uint32_t lowViolence = 1;
+    assert(SB_UNAVAILABLE == SteamBridge_UserIsLowViolence(&lowViolence));
+    assert(0 == lowViolence);
     SteamBridge_HostRunCallbacks();
     SteamBridge_HostShutdown();
 }
@@ -107,13 +115,20 @@ void Client(const char* mock)
     uint64_t id{};
     assert(SB_OK == SteamBridge_UserGetSteamID(&id));
     assert(76561198000000001 == id);
-    // The fixture exposes no SteamFriends/SteamApps; those calls report unavailability.
+    // The fixture exposes no SteamFriends, nor SteamApps until Apps enables it; those calls
+    // report unavailability.
     char name[4] = "x";
     assert(SB_UNAVAILABLE == SteamBridge_UserGetPersonaName(name, sizeof(name)));
     assert(0 == name[0]);
     uint32_t subscribed = 1;
     assert(SB_UNAVAILABLE == SteamBridge_UserIsSubscribedApp(70, &subscribed));
     assert(0 == subscribed);
+    char language[8] = "x";
+    assert(SB_UNAVAILABLE == SteamBridge_UserGetCurrentGameLanguage(language, sizeof(language)));
+    assert(0 == language[0]);
+    uint32_t lowViolence = 1;
+    assert(SB_UNAVAILABLE == SteamBridge_UserIsLowViolence(&lowViolence));
+    assert(0 == lowViolence);
 
     assert(SB_OK == SteamBridge_VoiceStartRecording());
     uint32_t available{};
@@ -204,6 +219,42 @@ void Client(const char* mock)
     assert(2 == forwarded()->portsDestroyed && !SteamBridge_IsFakeIPv4(0xa9fe0102));
     assert(SB_UNAVAILABLE == SteamBridge_UserGetSteamID(&id));
     SteamBridge_HostSetClientCallback(nullptr, nullptr);
+}
+void Apps(const char* mock)
+{
+    setApps(1, "schinese", 1);
+    assert(SB_OK == SteamBridge_HostInit(mock, 1));
+    uint32_t subscribed{};
+    assert(SB_OK == SteamBridge_UserIsSubscribedApp(70, &subscribed));
+    assert(1 == subscribed);
+    assert(SB_OK == SteamBridge_UserIsSubscribedApp(10, &subscribed));
+    assert(0 == subscribed);
+    char language[16]{};
+    assert(SB_OK == SteamBridge_UserGetCurrentGameLanguage(language, sizeof(language)));
+    assert(!std::strcmp("schinese", language));
+    char truncated[4]{};
+    assert(SB_OK == SteamBridge_UserGetCurrentGameLanguage(truncated, sizeof(truncated)));
+    assert(!std::strcmp("sch", truncated));
+    assert(SB_INVALID_ARGUMENT == SteamBridge_UserGetCurrentGameLanguage(nullptr, sizeof(language)));
+    assert(SB_INVALID_ARGUMENT == SteamBridge_UserGetCurrentGameLanguage(language, 0));
+    uint32_t lowViolence{};
+    assert(SB_OK == SteamBridge_UserIsLowViolence(&lowViolence));
+    assert(1 == lowViolence);
+    assert(SB_INVALID_ARGUMENT == SteamBridge_UserIsLowViolence(nullptr));
+    SteamBridge_HostShutdown();
+
+    // SteamApps without a language fails the query and still answers the others.
+    setApps(1, nullptr, 0);
+    assert(SB_OK == SteamBridge_HostInit(mock, 1));
+    std::strcpy(language, "x");
+    assert(SB_FAILED == SteamBridge_UserGetCurrentGameLanguage(language, sizeof(language)));
+    assert(0 == language[0]);
+    lowViolence = 1;
+    assert(SB_OK == SteamBridge_UserIsLowViolence(&lowViolence));
+    assert(0 == lowViolence);
+    SteamBridge_HostShutdown();
+    setApps(0, nullptr, 0);
+    assert(!SteamBridge_HostIsActive());
 }
 void DedicatedServer(const char* mock)
 {
@@ -314,10 +365,12 @@ int main(int argc, char** argv)
     mock::queueFake   = platform::Resolve<QueueFakeFn>(module, "MockHostQueueFakeMessage");
     mock::setFakeIP   = platform::Resolve<SetFakeIPFn>(module, "MockHostSetFakeIP");
     mock::emitDebug   = platform::Resolve<EmitDebugFn>(module, "MockHostEmitDebug");
+    mock::setApps     = platform::Resolve<SetAppsFn>(module, "MockHostSetApps");
     assert(mock::failInit && mock::voiceResult && mock::stat && mock::forwarded && mock::queue);
-    assert(mock::queueFake && mock::setFakeIP && mock::emitDebug);
+    assert(mock::queueFake && mock::setFakeIP && mock::emitDebug && mock::setApps);
     Unavailable(argv[2]);
     Client(argv[1]);
+    Apps(argv[1]);
     DedicatedServer(argv[1]);
     platform::UnloadRuntime(module);
 }

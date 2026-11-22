@@ -68,8 +68,9 @@ both leave the runtime unloaded. A dedicated server passes `initializeClient = 0
 only uses the game server functions.
 
 * Client: game connection tickets (`InitiateGameConnection_DEPRECATED`), SteamID,
-  persona name, app subscription and voice (User023, Friends018, Apps009). Missing
-  interfaces make the corresponding calls return `SB_UNAVAILABLE`.
+  persona name, app subscription, current game language, low violence and voice
+  (User023, Friends018, Apps009). Missing interfaces make the corresponding calls return
+  `SB_UNAVAILABLE`.
 * Game server (`SteamBridge_ServerInit`): GameServer015 logon, server rules and
   heartbeats, ticket authentication (`SendUserConnectAndAuthenticate_DEPRECATED`),
   bots and shared-socket master server packets. The interface version list matches
@@ -130,7 +131,8 @@ runtime for the target architecture beside the bridge, as host mode expects;
 ## Verification
 
 CTest covers, on every supported platform, absent runtimes and host mode against a
-fixture runtime: client initialization failure and retry, connection tickets, voice
+fixture runtime: client initialization failure and retry, connection tickets, app
+subscription, game language (including truncation and a missing language), low violence, voice
 capture/decoding and non-OK voice results, client and game server event translation
 and dispatcher separation, deferred shutdown from callbacks, game server setters and
 authentication, packets, dedicated (server-only) sessions, and FakeIP ports: datagram

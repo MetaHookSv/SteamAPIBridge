@@ -404,6 +404,24 @@ SteamBridgeStatus SteamBridge_UserIsSubscribedApp(uint32_t appID, uint32_t* subs
     *subscribed = host.apps->BIsSubscribedApp(appID);
     return SB_OK;
 }
+SteamBridgeStatus SteamBridge_UserGetCurrentGameLanguage(char* language, uint32_t capacity)
+{
+    if (!language || !capacity) return SB_INVALID_ARGUMENT;
+    language[0] = 0;
+    if (!host.apps) return SB_UNAVAILABLE;
+    const char* current = host.apps->GetCurrentGameLanguage();
+    if (!current) return SB_FAILED;
+    CopyText(language, capacity, current);
+    return SB_OK;
+}
+SteamBridgeStatus SteamBridge_UserIsLowViolence(uint32_t* lowViolence)
+{
+    if (!lowViolence) return SB_INVALID_ARGUMENT;
+    *lowViolence = 0;
+    if (!host.apps) return SB_UNAVAILABLE;
+    *lowViolence = host.apps->BIsLowViolence();
+    return SB_OK;
+}
 
 SteamBridgeStatus SteamBridge_VoiceStartRecording()
 {

@@ -91,6 +91,17 @@ public:
     uint32 GetVoiceOptimalSampleRate() override { return 24000; }
 } user;
 
+// MockHostSetApps controls whether SteamApps exists and what it reports.
+bool appsAvailable, appsHasLanguage, appsLowViolence;
+char appsLanguage[32];
+class Apps final : public StubApps
+{
+public:
+    bool        BIsLowViolence() override { return appsLowViolence; }
+    const char* GetCurrentGameLanguage() override { return appsHasLanguage ? appsLanguage : nullptr; }
+    bool        BIsSubscribedApp(AppId_t appID) override { return appID == 70; }
+} apps;
+
 class GameServer final : public StubGameServer
 {
 public:
@@ -227,6 +238,7 @@ extern "C"
     S_API void* S_CALLTYPE      SteamInternal_FindOrCreateUserInterface(HSteamUser steamUser, const char* version)
     {
         if (!std::strcmp(version, STEAMUSER_INTERFACE_VERSION)) return &user;
+        if (!std::strcmp(version, STEAMAPPS_INTERFACE_VERSION)) return appsAvailable ? &apps : nullptr;
         if (!std::strcmp(version, STEAMNETWORKINGSOCKETS_INTERFACE_VERSION)) return steamUser == 1 ? &clientSockets : nullptr;
         // The global utilities (user 0) exist once the client is initialized.
         if (!std::strcmp(version, STEAMNETWORKINGUTILS_INTERFACE_VERSION)) return clientInitialized && !steamUser ? &utils : nullptr;
@@ -261,7 +273,15 @@ extern "C"
     // Fixture control.
     S_API void S_CALLTYPE MockHostSetFailInit(int value) { failInit = value; }
     S_API void S_CALLTYPE MockHostSetVoiceResult(int value) { voiceResult = value; }
-    S_API int S_CALLTYPE  MockHostStat(int which)
+    // Applies to the next client initialization. A NULL language makes SteamApps return NULL.
+    S_API void S_CALLTYPE MockHostSetApps(int available, const char* language, int lowViolence)
+    {
+        appsAvailable   = available != 0;
+        appsHasLanguage = language != nullptr;
+        appsLowViolence = lowViolence != 0;
+        std::snprintf(appsLanguage, sizeof(appsLanguage), "%s", language ? language : "");
+    }
+    S_API int S_CALLTYPE MockHostStat(int which)
     {
         switch (which)
         {
