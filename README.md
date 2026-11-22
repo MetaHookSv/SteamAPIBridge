@@ -82,8 +82,17 @@ only uses the game server functions.
   are bridge handles; a session's shutdown destroys the ports it still holds. Received
   datagrams are copied out and released inside the bridge; one that does not fit, or does
   not come from an IP address, is dropped and described.
+* Server browsing (client, MatchMakingServers003): Internet, LAN, friends, favorites,
+  history and spectator server lists with key/value filters, server details, refresh and
+  cancellation, and ping and player queries. List requests are bridge handles and queries
+  bridge numbers; their answers reach the callback given to the request, copied out of
+  `gameserveritem_t`. A request released, or a query cancelled, from a callback answers no
+  more at once, and Steam releases or cancels it after the dispatcher returns. Client
+  shutdown releases and cancels the rest. Favorites and history (MatchMaking009): count,
+  add and remove. Friends018: a friend's persona name and game; Apps009: VAC ban status.
 * Events: ClientGameServerDeny, GameServerChangeRequested and GameOverlayActivated
-  reach the client callback during `SteamBridge_HostRunCallbacks`; SteamServersConnected,
+  reach the client callback during `SteamBridge_HostRunCallbacks`, and FavoritesListChanged
+  and PersonaStateChange the separate matchmaking callback; SteamServersConnected,
   SteamServerConnectFailure, GSPolicyResponse, GSClientApprove/Deny/Kick and
   SteamNetworkingFakeIPResult reach the server callback during
   `SteamBridge_ServerRunCallbacks`. Fields are copied out of
@@ -137,7 +146,10 @@ capture/decoding and non-OK voice results, client and game server event translat
 and dispatcher separation, deferred shutdown from callbacks, game server setters and
 authentication, packets, dedicated (server-only) sessions, and FakeIP ports: datagram
 send results, delivery and dropping, cleanup, session-owned port destruction, the game
-server's FakeIP request and result event, and diagnostics forwarding. On Windows it also
+server's FakeIP request and result event, diagnostics forwarding, and server browsing:
+list kinds and filters, details, refresh and cancellation calls, list, ping and player
+answers, deferred release and cancellation from callbacks, release and cancellation at
+shutdown, favorites, friends, VAC status and the matchmaking events. On Windows it also
 covers plugin mode: absent/uninitialized Steam, legacy (x86) and intermediate-modern
 exports, exact-version availability and retry, SteamID/screenshots, cookie/certificate
 forwarding, stream events, context isolation, cancellation and reentrant destruction.
