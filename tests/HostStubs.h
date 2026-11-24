@@ -1,6 +1,6 @@
 #pragma once
 // Empty implementations of every SteamUser023, SteamApps009, SteamGameServer015, SteamNetworkingSockets013,
-// SteamNetworkingUtils004, SteamMatchMaking009, SteamMatchMakingServers003 and SteamFriends018 method,
+// SteamNetworkingUtils004, SteamMatchMaking009, SteamMatchMakingServers003, SteamFriends018 and SteamUtils011 method,
 // generated from the Steamworks SDK v1.65 declarations. Mocks override the methods they exercise.
 #include <steam/steam_api.h>
 #include <steam/steam_gameserver.h>
@@ -354,4 +354,48 @@ public:
     bool                BHasEquippedProfileItem(CSteamID steamID, ECommunityProfileItemType itemType) override { return {}; }
     const char*         GetProfileItemPropertyString(CSteamID steamID, ECommunityProfileItemType itemType, ECommunityProfileItemProperty prop) override { return {}; }
     uint32              GetProfileItemPropertyUint(CSteamID steamID, ECommunityProfileItemType itemType, ECommunityProfileItemProperty prop) override { return {}; }
+};
+class StubUtils : public ISteamUtils
+{
+public:
+    uint32                      GetSecondsSinceAppActive() override { return {}; }
+    uint32                      GetSecondsSinceComputerActive() override { return {}; }
+    EUniverse                   GetConnectedUniverse() override { return {}; }
+    uint32                      GetServerRealTime() override { return {}; }
+    const char*                 GetIPCountry() override { return {}; }
+    bool                        GetImageSize(int iImage, uint32* pnWidth, uint32* pnHeight) override { return {}; }
+    bool                        GetImageRGBA(int iImage, uint8* pubDest, int nDestBufferSize) override { return {}; }
+    uint8                       GetCurrentBatteryPower() override { return {}; }
+    uint32                      GetAppID() override { return {}; }
+    void                        SetOverlayNotificationPosition(ENotificationPosition eNotificationPosition) override {}
+    bool                        IsAPICallCompleted(SteamAPICall_t hSteamAPICall, bool* pbFailed) override { return {}; }
+    ESteamAPICallFailure        GetAPICallFailureReason(SteamAPICall_t hSteamAPICall) override { return {}; }
+    bool                        GetAPICallResult(SteamAPICall_t hSteamAPICall, void* pCallback, int cubCallback, int iCallbackExpected, bool* pbFailed) override { return {}; }
+    void                        RunFrame() override {}
+    uint32                      GetIPCCallCount() override { return {}; }
+    void                        SetWarningMessageHook(SteamAPIWarningMessageHook_t pFunction) override {}
+    bool                        IsOverlayEnabled() override { return {}; }
+    bool                        BOverlayNeedsPresent() override { return {}; }
+    SteamAPICall_t              CheckFileSignature(const char* szFileName) override { return {}; }
+    bool                        ShowGamepadTextInput(EGamepadTextInputMode eInputMode, EGamepadTextInputLineMode eLineInputMode, const char* pchDescription, uint32 unCharMax, const char* pchExistingText) override { return {}; }
+    uint32                      GetEnteredGamepadTextLength() override { return {}; }
+    bool                        GetEnteredGamepadTextInput(char* pchText, uint32 cchText) override { return {}; }
+    const char*                 GetSteamUILanguage() override { return {}; }
+    bool                        IsSteamRunningInVR() override { return {}; }
+    void                        SetOverlayNotificationInset(int nHorizontalInset, int nVerticalInset) override {}
+    bool                        IsSteamInBigPictureMode() override { return {}; }
+    void                        StartVRDashboard() override {}
+    bool                        IsVRHeadsetStreamingEnabled() override { return {}; }
+    void                        SetVRHeadsetStreamingEnabled(bool bEnabled) override {}
+    bool                        IsSteamChinaLauncher() override { return {}; }
+    bool                        InitFilterText(uint32 unFilterOptions) override { return {}; }
+    int                         FilterText(ETextFilteringContext eContext, CSteamID sourceSteamID, const char* pchInputMessage, char* pchOutFilteredText, uint32 nByteSizeOutFilteredText) override { return {}; }
+    ESteamIPv6ConnectivityState GetIPv6ConnectivityState(ESteamIPv6ConnectivityProtocol eProtocol) override { return {}; }
+    bool                        ShowFloatingGamepadTextInput(EFloatingGamepadTextInputMode eKeyboardMode, int nTextFieldXPosition, int nTextFieldYPosition, int nTextFieldWidth, int nTextFieldHeight) override { return {}; }
+    void                        SetGameLauncherMode(bool bLauncherMode) override {}
+    bool                        DismissFloatingGamepadTextInput() override { return {}; }
+    bool                        DismissGamepadTextInput() override { return {}; }
+    ESteamHardwareType          IsRunningOnSteamHardware() override { return {}; }
+    ESteamHardwareDefaultConfig GetSteamHardwareDefaultConfig() override { return {}; }
+    bool                        IsRunningUnderProton() override { return {}; }
 };
