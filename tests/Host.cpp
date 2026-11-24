@@ -162,8 +162,9 @@ void Client(const char* mock)
     char name[4] = "x";
     assert(SB_UNAVAILABLE == SteamBridge_UserGetPersonaName(name, sizeof(name)));
     assert(0 == name[0]);
-    int32_t image = 1, relationship = 1;
-    assert(SB_UNAVAILABLE == SteamBridge_FriendsGetAvatar(76561198000000005, SB_AVATAR_SMALL, &image) && 0 == image);
+    SteamBridgeImageId image        = 1;
+    int32_t            relationship = 1;
+    assert(SB_UNAVAILABLE == SteamBridge_FriendsGetAvatar(76561198000000005, SB_AVATAR_SMALL, &image) && SB_IMAGE_NONE == image);
     assert(SB_UNAVAILABLE == SteamBridge_FriendsGetRelationship(76561198000000005, &relationship) && SB_FRIEND_RELATIONSHIP_NONE == relationship);
     uint32_t subscribed = 1;
     assert(SB_UNAVAILABLE == SteamBridge_UserIsSubscribedApp(70, &subscribed));
@@ -451,12 +452,12 @@ void Servers(const char* mock)
     assert(SB_OK == SteamBridge_FriendsGetRelationship(76561198000000005, &relationship) && SB_FRIEND_RELATIONSHIP_IGNORED_FRIEND == relationship);
     assert(SB_OK == SteamBridge_FriendsGetRelationship(1, &relationship) && SB_FRIEND_RELATIONSHIP_NONE == relationship);
     assert(SB_INVALID_ARGUMENT == SteamBridge_FriendsGetRelationship(1, nullptr));
-    int32_t image = 1;
+    SteamBridgeImageId image = 1;
     assert(SB_OK == SteamBridge_FriendsGetAvatar(76561198000000005, SB_AVATAR_SMALL, &image) && 7 == image);
-    assert(SB_OK == SteamBridge_FriendsGetAvatar(76561198000000005, SB_AVATAR_MEDIUM, &image) && -1 == image);
-    assert(SB_OK == SteamBridge_FriendsGetAvatar(76561198000000005, SB_AVATAR_LARGE, &image) && 0 == image);
+    assert(SB_OK == SteamBridge_FriendsGetAvatar(76561198000000005, SB_AVATAR_MEDIUM, &image) && SB_IMAGE_LOADING == image);
+    assert(SB_OK == SteamBridge_FriendsGetAvatar(76561198000000005, SB_AVATAR_LARGE, &image) && SB_IMAGE_NONE == image);
     image = 1;
-    assert(SB_INVALID_ARGUMENT == SteamBridge_FriendsGetAvatar(76561198000000005, 0, &image) && 0 == image);
+    assert(SB_INVALID_ARGUMENT == SteamBridge_FriendsGetAvatar(76561198000000005, 0, &image) && SB_IMAGE_NONE == image);
     uint32_t width = 9, height = 9;
     assert(SB_OK == SteamBridge_UtilsGetImageSize(7, &width, &height) && 2 == width && 1 == height);
     assert(SB_FAILED == SteamBridge_UtilsGetImageSize(8, &width, &height) && 0 == width && 0 == height);
@@ -477,7 +478,7 @@ void Servers(const char* mock)
     assert(released + 1 == forwarded()->listsReleased && cancelled + 1 == forwarded()->queriesCancelled);
     assert(SB_INVALID_ARGUMENT == SteamBridge_ServersRefreshQuery(request));
     assert(SB_UNAVAILABLE == SteamBridge_AppsIsVACBanned(&banned) && 0 == banned);
-    assert(SB_UNAVAILABLE == SteamBridge_FriendsGetAvatar(76561198000000005, SB_AVATAR_SMALL, &image) && 0 == image);
+    assert(SB_UNAVAILABLE == SteamBridge_FriendsGetAvatar(76561198000000005, SB_AVATAR_SMALL, &image) && SB_IMAGE_NONE == image);
     assert(SB_UNAVAILABLE == SteamBridge_UtilsGetImageSize(7, &width, &height) && 0 == width && 0 == height);
     assert(SB_UNAVAILABLE == SteamBridge_UtilsGetImageRGBA(7, rgba, sizeof(rgba)));
     SteamBridge_HostSetMatchmakingCallback(nullptr, nullptr);

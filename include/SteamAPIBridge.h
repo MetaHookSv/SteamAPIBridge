@@ -449,14 +449,20 @@ extern "C"
         SB_AVATAR_MEDIUM = 2,
         SB_AVATAR_LARGE  = 3
     };
-    // The image handle of the user's avatar, as Steam returns it: 0 when the user has none, -1 while Steam
-    // is still loading it (ask again later). Read the image with SteamBridge_UtilsGetImageSize and
+    // An image handle of Steam (ISteamUtils), such as an avatar.
+    typedef int32_t SteamBridgeImageId;
+    enum
+    {
+        SB_IMAGE_NONE    = 0, // the user has no avatar
+        SB_IMAGE_LOADING = -1 // Steam is still loading the avatar; ask again later
+    };
+    // The image of the user's avatar, as Steam returns it. Read it with SteamBridge_UtilsGetImageSize and
     // SteamBridge_UtilsGetImageRGBA.
-    STEAMBRIDGE_API SteamBridgeStatus STEAMBRIDGE_CALL SteamBridge_FriendsGetAvatar(uint64_t steamID, uint32_t size, int32_t* image);
+    STEAMBRIDGE_API SteamBridgeStatus STEAMBRIDGE_CALL SteamBridge_FriendsGetAvatar(uint64_t steamID, uint32_t size, SteamBridgeImageId* image);
 
     // Images (ISteamUtils). SB_FAILED: no such image, or rgba holds less than 4 * width * height bytes.
-    STEAMBRIDGE_API SteamBridgeStatus STEAMBRIDGE_CALL SteamBridge_UtilsGetImageSize(int32_t image, uint32_t* width, uint32_t* height);
-    STEAMBRIDGE_API SteamBridgeStatus STEAMBRIDGE_CALL SteamBridge_UtilsGetImageRGBA(int32_t image, uint8_t* rgba, uint32_t capacity);
+    STEAMBRIDGE_API SteamBridgeStatus STEAMBRIDGE_CALL SteamBridge_UtilsGetImageSize(SteamBridgeImageId image, uint32_t* width, uint32_t* height);
+    STEAMBRIDGE_API SteamBridgeStatus STEAMBRIDGE_CALL SteamBridge_UtilsGetImageRGBA(SteamBridgeImageId image, uint8_t* rgba, uint32_t capacity);
     STEAMBRIDGE_API SteamBridgeStatus STEAMBRIDGE_CALL SteamBridge_AppsIsVACBanned(uint32_t* banned);
 
 #ifdef __cplusplus
