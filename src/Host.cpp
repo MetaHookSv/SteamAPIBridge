@@ -1145,10 +1145,10 @@ SteamBridgeStatus SteamBridge_FriendsGetRelationship(uint64_t steamID, int32_t* 
     *relationship = host.friends->GetFriendRelationship(CSteamID(uint64(steamID)));
     return SB_OK;
 }
-SteamBridgeStatus SteamBridge_FriendsGetAvatar(uint64_t steamID, uint32_t size, int32_t* image)
+SteamBridgeStatus SteamBridge_FriendsGetAvatar(uint64_t steamID, uint32_t size, SteamBridgeImageId* image)
 {
     if (!image) return SB_INVALID_ARGUMENT;
-    *image = 0;
+    *image = SB_IMAGE_NONE;
     if (size != SB_AVATAR_SMALL && size != SB_AVATAR_MEDIUM && size != SB_AVATAR_LARGE) return SB_INVALID_ARGUMENT;
     if (!host.friends) return SB_UNAVAILABLE;
     const CSteamID id{uint64(steamID)};
@@ -1161,7 +1161,7 @@ SteamBridgeStatus SteamBridge_FriendsGetAvatar(uint64_t steamID, uint32_t size, 
     return SB_OK;
 }
 
-SteamBridgeStatus SteamBridge_UtilsGetImageSize(int32_t image, uint32_t* width, uint32_t* height)
+SteamBridgeStatus SteamBridge_UtilsGetImageSize(SteamBridgeImageId image, uint32_t* width, uint32_t* height)
 {
     if (!width || !height) return SB_INVALID_ARGUMENT;
     *width  = 0;
@@ -1173,7 +1173,7 @@ SteamBridgeStatus SteamBridge_UtilsGetImageSize(int32_t image, uint32_t* width, 
     *height = nativeHeight;
     return SB_OK;
 }
-SteamBridgeStatus SteamBridge_UtilsGetImageRGBA(int32_t image, uint8_t* rgba, uint32_t capacity)
+SteamBridgeStatus SteamBridge_UtilsGetImageRGBA(SteamBridgeImageId image, uint8_t* rgba, uint32_t capacity)
 {
     if (!rgba || !capacity || capacity > uint32_t(INT32_MAX)) return SB_INVALID_ARGUMENT;
     if (!host.steamUtils) return SB_UNAVAILABLE;
