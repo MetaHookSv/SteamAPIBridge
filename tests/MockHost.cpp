@@ -43,7 +43,7 @@ void Dispatch(bool gameServer)
         auto snapshot = callbacks;
         for (auto callback : snapshot)
             if (std::find(callbacks.begin(), callbacks.end(), callback) != callbacks.end() && callback->GetICallback() == item.id && Peek::GameServer(callback) == gameServer)
-                callback->Run(item.payload.data());
+                callback->Run(item.payload.empty() ? nullptr : item.payload.data());
     }
 }
 
@@ -95,6 +95,7 @@ public:
 // MockHostSetApps controls whether SteamApps exists and what it reports.
 bool appsAvailable, appsHasLanguage, appsLowViolence, appsVACBanned;
 char appsLanguage[32];
+char appsLaunchCommandLine[256];
 class Apps final : public StubApps
 {
 public:
@@ -102,6 +103,20 @@ public:
     const char* GetCurrentGameLanguage() override { return appsHasLanguage ? appsLanguage : nullptr; }
     bool        BIsSubscribedApp(AppId_t appID) override { return appID == 70; }
     bool        BIsVACBanned() override { return appsVACBanned; }
+    int         GetLaunchCommandLine(char* commandLine, int capacity) override
+    {
+        size_t length = std::strlen(appsLaunchCommandLine);
+        if (!length)
+        {
+            if (commandLine && capacity > 0) commandLine[0] = 0;
+            return 0;
+        }
+        if (!commandLine || capacity <= 0) return int(length + 1);
+        size_t copied = std::min(length, size_t(capacity - 1));
+        std::memcpy(commandLine, appsLaunchCommandLine, copied);
+        commandLine[copied] = 0;
+        return int(copied + 1);
+    }
 } apps;
 
 // Answers queued for the next client dispatch.
@@ -437,6 +452,10 @@ extern "C"
         appsVACBanned   = vacBanned != 0;
         std::snprintf(appsLanguage, sizeof(appsLanguage), "%s", language ? language : "");
     }
+    S_API void S_CALLTYPE MockHostSetLaunchCommandLine(const char* commandLine)
+    {
+        std::snprintf(appsLaunchCommandLine, sizeof(appsLaunchCommandLine), "%s", commandLine ? commandLine : "");
+    }
     S_API void S_CALLTYPE MockHostSetFriends(int available) { friendsAvailable = available != 0; }
     // Sets the details of server 0 in every list.
     S_API void S_CALLTYPE MockHostSetServerDetails(const char* name, const char* map, int players)
@@ -508,7 +527,7 @@ extern "C"
     S_API void S_CALLTYPE        MockHostQueue(int id, int gameServer, const void* payload, int bytes)
     {
         auto data = static_cast<const char*>(payload);
-        queue.push_back({id, gameServer != 0, std::vector<char>(data, data + bytes)});
+        queue.push_back({id, gameServer != 0, data && bytes > 0 ? std::vector<char>(data, data + bytes) : std::vector<char>()});
     }
     // Queues a FakeIP datagram of bytes bytes, from an IP address or a SteamID (MOCK_FAKE_FROM_*).
     S_API void S_CALLTYPE MockHostQueueFakeMessage(int from, uint32_t ip, uint16_t port, int bytes)

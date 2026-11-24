@@ -68,7 +68,7 @@ both leave the runtime unloaded. A dedicated server passes `initializeClient = 0
 only uses the game server functions.
 
 * Client: game connection tickets (`InitiateGameConnection_DEPRECATED`), SteamID,
-  persona name, app subscription, current game language, low violence and voice
+  persona name, app subscription, current game language, low violence, launch command line and voice
   (User023, Friends018, Apps009). Missing interfaces make the corresponding calls return
   `SB_UNAVAILABLE`.
 * Game server (`SteamBridge_ServerInit`): GameServer015 logon, server rules and
@@ -91,9 +91,10 @@ only uses the game server functions.
   shutdown releases and cancels the rest. Favorites and history (MatchMaking009): count,
   add and remove. Friends018: a user's persona name, game, relationship and avatar image handles;
   Utils011: the size and RGBA pixels of those images; Apps009: VAC ban status.
-* Events: ClientGameServerDeny, GameServerChangeRequested and GameOverlayActivated
-  reach the client callback during `SteamBridge_HostRunCallbacks`, and FavoritesListChanged
-  and PersonaStateChange the separate matchmaking callback; SteamServersConnected,
+* Events: ClientGameServerDeny, GameServerChangeRequested, GameOverlayActivated,
+  NewUrlLaunchParameters and GameRichPresenceJoinRequested reach the client callback
+  during `SteamBridge_HostRunCallbacks`, and FavoritesListChanged and PersonaStateChange
+  the separate matchmaking callback; SteamServersConnected,
   SteamServerConnectFailure, GSPolicyResponse, GSClientApprove/Deny/Kick and
   SteamNetworkingFakeIPResult reach the server callback during
   `SteamBridge_ServerRunCallbacks`. Fields are copied out of
@@ -142,7 +143,8 @@ runtime for the target architecture beside the bridge, as host mode expects;
 
 CTest covers, on every supported platform, absent runtimes and host mode against a
 fixture runtime: client initialization failure and retry, connection tickets, app
-subscription, game language (including truncation and a missing language), low violence, voice
+subscription, game language (including truncation and a missing language), low violence,
+launch command line (size probing, truncation, empty and invalid arguments), voice
 capture/decoding and non-OK voice results, client and game server event translation
 and dispatcher separation, deferred shutdown from callbacks, game server setters and
 authentication, packets, dedicated (server-only) sessions, and FakeIP ports: datagram
