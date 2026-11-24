@@ -430,6 +430,33 @@ extern "C"
     STEAMBRIDGE_API SteamBridgeStatus STEAMBRIDGE_CALL SteamBridge_FriendsGetPersonaName(uint64_t steamID, char* name, uint32_t capacity);
     // SB_FAILED: the friend is not in a game.
     STEAMBRIDGE_API SteamBridgeStatus STEAMBRIDGE_CALL SteamBridge_FriendsGetGamePlayed(uint64_t steamID, SteamBridgeFriendGame* game);
+    // Relationship values are Steam's EFriendRelationship.
+    enum
+    {
+        SB_FRIEND_RELATIONSHIP_NONE              = 0,
+        SB_FRIEND_RELATIONSHIP_BLOCKED           = 1,
+        SB_FRIEND_RELATIONSHIP_REQUEST_RECIPIENT = 2,
+        SB_FRIEND_RELATIONSHIP_FRIEND            = 3,
+        SB_FRIEND_RELATIONSHIP_REQUEST_INITIATOR = 4,
+        SB_FRIEND_RELATIONSHIP_IGNORED           = 5,
+        SB_FRIEND_RELATIONSHIP_IGNORED_FRIEND    = 6
+    };
+    STEAMBRIDGE_API SteamBridgeStatus STEAMBRIDGE_CALL SteamBridge_FriendsGetRelationship(uint64_t steamID, int32_t* relationship);
+    // Avatar sizes: 32x32, 64x64 and 184x184 pixels.
+    enum
+    {
+        SB_AVATAR_SMALL  = 1,
+        SB_AVATAR_MEDIUM = 2,
+        SB_AVATAR_LARGE  = 3
+    };
+    // The image handle of the user's avatar, as Steam returns it: 0 when the user has none, -1 while Steam
+    // is still loading it (ask again later). Read the image with SteamBridge_UtilsGetImageSize and
+    // SteamBridge_UtilsGetImageRGBA.
+    STEAMBRIDGE_API SteamBridgeStatus STEAMBRIDGE_CALL SteamBridge_FriendsGetAvatar(uint64_t steamID, uint32_t size, int32_t* image);
+
+    // Images (ISteamUtils). SB_FAILED: no such image, or rgba holds less than 4 * width * height bytes.
+    STEAMBRIDGE_API SteamBridgeStatus STEAMBRIDGE_CALL SteamBridge_UtilsGetImageSize(int32_t image, uint32_t* width, uint32_t* height);
+    STEAMBRIDGE_API SteamBridgeStatus STEAMBRIDGE_CALL SteamBridge_UtilsGetImageRGBA(int32_t image, uint8_t* rgba, uint32_t capacity);
     STEAMBRIDGE_API SteamBridgeStatus STEAMBRIDGE_CALL SteamBridge_AppsIsVACBanned(uint32_t* banned);
 
 #ifdef __cplusplus

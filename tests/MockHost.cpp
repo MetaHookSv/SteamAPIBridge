@@ -220,7 +220,31 @@ public:
         info->m_steamIDLobby = CSteamID(uint64(76561198000000006));
         return true;
     }
+    EFriendRelationship GetFriendRelationship(CSteamID id) override { return id.ConvertToUint64() == 76561198000000005 ? k_EFriendRelationshipIgnoredFriend : k_EFriendRelationshipNone; }
+    // The friend's small avatar is image 7, the medium one is still loading and there is no large one.
+    int GetSmallFriendAvatar(CSteamID id) override { return id.ConvertToUint64() == 76561198000000005 ? 7 : 0; }
+    int GetMediumFriendAvatar(CSteamID id) override { return id.ConvertToUint64() == 76561198000000005 ? -1 : 0; }
 } friends;
+
+// Image 7 is 2x1 pixels.
+const uint8 avatarPixels[] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88};
+class Utils final : public StubUtils
+{
+public:
+    bool GetImageSize(int image, uint32* width, uint32* height) override
+    {
+        if (image != 7) return false;
+        *width  = 2;
+        *height = 1;
+        return true;
+    }
+    bool GetImageRGBA(int image, uint8* rgba, int capacity) override
+    {
+        if (image != 7 || capacity < int(sizeof(avatarPixels))) return false;
+        std::memcpy(rgba, avatarPixels, sizeof(avatarPixels));
+        return true;
+    }
+} steamUtils;
 
 class GameServer final : public StubGameServer
 {
@@ -372,6 +396,7 @@ extern "C"
         if (!std::strcmp(version, STEAMNETWORKINGSOCKETS_INTERFACE_VERSION)) return steamUser == 1 ? &clientSockets : nullptr;
         // The global utilities (user 0) exist once the client is initialized.
         if (!std::strcmp(version, STEAMNETWORKINGUTILS_INTERFACE_VERSION)) return clientInitialized && !steamUser ? &utils : nullptr;
+        if (!std::strcmp(version, STEAMUTILS_INTERFACE_VERSION)) return clientInitialized && !steamUser ? &steamUtils : nullptr;
         return nullptr;
     }
     S_API ESteamAPIInitResult S_CALLTYPE SteamInternal_GameServer_Init_V2(uint32, uint16, uint16, EServerMode mode, const char*, const char* versions, SteamErrMsg*)

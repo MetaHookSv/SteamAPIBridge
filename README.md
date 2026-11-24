@@ -89,7 +89,8 @@ only uses the game server functions.
   `gameserveritem_t`. A request released, or a query cancelled, from a callback answers no
   more at once, and Steam releases or cancels it after the dispatcher returns. Client
   shutdown releases and cancels the rest. Favorites and history (MatchMaking009): count,
-  add and remove. Friends018: a friend's persona name and game; Apps009: VAC ban status.
+  add and remove. Friends018: a user's persona name, game, relationship and avatar image handles;
+  Utils011: the size and RGBA pixels of those images; Apps009: VAC ban status.
 * Events: ClientGameServerDeny, GameServerChangeRequested and GameOverlayActivated
   reach the client callback during `SteamBridge_HostRunCallbacks`, and FavoritesListChanged
   and PersonaStateChange the separate matchmaking callback; SteamServersConnected,
@@ -149,7 +150,7 @@ send results, delivery and dropping, cleanup, session-owned port destruction, th
 server's FakeIP request and result event, diagnostics forwarding, and server browsing:
 list kinds and filters, details, refresh and cancellation calls, list, ping and player
 answers, deferred release and cancellation from callbacks, release and cancellation at
-shutdown, favorites, friends, VAC status and the matchmaking events. On Windows it also
+shutdown, favorites, friends, avatars and their images, VAC status and the matchmaking events. On Windows it also
 covers plugin mode: absent/uninitialized Steam, legacy (x86) and intermediate-modern
 exports, exact-version availability and retry, SteamID/screenshots, cookie/certificate
 forwarding, stream events, context isolation, cancellation and reentrant destruction.

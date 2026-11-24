@@ -73,6 +73,7 @@ struct Host
     UnregisterFn                   unregisterCallback{};
     ISteamUser*                    user{};
     ISteamFriends*                 friends{};
+    ISteamUtils*                   steamUtils{};
     ISteamApps*                    apps{};
     ISteamMatchmaking*             matchmaking{};
     ISteamMatchmakingServers*      servers{};
@@ -405,6 +406,8 @@ SteamBridgeStatus SteamBridge_HostInit(const char* runtimePath, uint32_t initial
             h.sockets            = static_cast<ISteamNetworkingSockets*>(h.findUser(steamUser, STEAMNETWORKINGSOCKETS_INTERFACE_VERSION));
             // The networking utilities are global, not per user (SteamNetworkingUtils_SteamAPI).
             h.utils = static_cast<ISteamNetworkingUtils*>(h.findUser(0, STEAMNETWORKINGUTILS_INTERFACE_VERSION));
+            // So are the Steam utilities (SteamUtils).
+            h.steamUtils = static_cast<ISteamUtils*>(h.findUser(0, STEAMUTILS_INTERFACE_VERSION));
         }
         h.clientFn        = host.clientFn;
         h.clientUser      = host.clientUser;
@@ -1133,6 +1136,48 @@ SteamBridgeStatus SteamBridge_FriendsGetGamePlayed(uint64_t steamID, SteamBridge
     game->queryPort    = info.m_usQueryPort;
     game->lobbySteamID = info.m_steamIDLobby.ConvertToUint64();
     return SB_OK;
+}
+SteamBridgeStatus SteamBridge_FriendsGetRelationship(uint64_t steamID, int32_t* relationship)
+{
+    if (!relationship) return SB_INVALID_ARGUMENT;
+    *relationship = SB_FRIEND_RELATIONSHIP_NONE;
+    if (!host.friends) return SB_UNAVAILABLE;
+    *relationship = host.friends->GetFriendRelationship(CSteamID(uint64(steamID)));
+    return SB_OK;
+}
+SteamBridgeStatus SteamBridge_FriendsGetAvatar(uint64_t steamID, uint32_t size, int32_t* image)
+{
+    if (!image) return SB_INVALID_ARGUMENT;
+    *image = 0;
+    if (size != SB_AVATAR_SMALL && size != SB_AVATAR_MEDIUM && size != SB_AVATAR_LARGE) return SB_INVALID_ARGUMENT;
+    if (!host.friends) return SB_UNAVAILABLE;
+    const CSteamID id{uint64(steamID)};
+    switch (size)
+    {
+        case SB_AVATAR_SMALL: *image = host.friends->GetSmallFriendAvatar(id); break;
+        case SB_AVATAR_MEDIUM: *image = host.friends->GetMediumFriendAvatar(id); break;
+        default: *image = host.friends->GetLargeFriendAvatar(id); break;
+    }
+    return SB_OK;
+}
+
+SteamBridgeStatus SteamBridge_UtilsGetImageSize(int32_t image, uint32_t* width, uint32_t* height)
+{
+    if (!width || !height) return SB_INVALID_ARGUMENT;
+    *width  = 0;
+    *height = 0;
+    if (!host.steamUtils) return SB_UNAVAILABLE;
+    uint32 nativeWidth{}, nativeHeight{};
+    if (!host.steamUtils->GetImageSize(image, &nativeWidth, &nativeHeight)) return SB_FAILED;
+    *width  = nativeWidth;
+    *height = nativeHeight;
+    return SB_OK;
+}
+SteamBridgeStatus SteamBridge_UtilsGetImageRGBA(int32_t image, uint8_t* rgba, uint32_t capacity)
+{
+    if (!rgba || !capacity || capacity > uint32_t(INT32_MAX)) return SB_INVALID_ARGUMENT;
+    if (!host.steamUtils) return SB_UNAVAILABLE;
+    return Result(host.steamUtils->GetImageRGBA(image, rgba, int(capacity)));
 }
 SteamBridgeStatus SteamBridge_AppsIsVACBanned(uint32_t* banned)
 {
