@@ -15,6 +15,7 @@ using QueueFakeFn  = void(S_CALLTYPE*)(int, uint32_t, uint16_t, int);
 using SetFakeIPFn  = void(S_CALLTYPE*)(int, uint32_t, uint16_t);
 using EmitDebugFn  = int(S_CALLTYPE*)(int, const char*);
 using SetAppsFn    = void(S_CALLTYPE*)(int, const char*, int, int);
+using SetTextFn    = void(S_CALLTYPE*)(const char*);
 using SetDetailsFn = void(S_CALLTYPE*)(const char*, const char*, int);
 using AnswerFn     = void(S_CALLTYPE*)(int, int);
 namespace mock
@@ -27,6 +28,7 @@ QueueFakeFn  queueFake;
 SetFakeIPFn  setFakeIP;
 EmitDebugFn  emitDebug;
 SetAppsFn    setApps;
+SetTextFn    setLaunchCommandLine;
 SetIntFn     setFriends, pingAnswer, playersAnswer;
 SetDetailsFn setServerDetails;
 AnswerFn     listAnswer;
@@ -129,6 +131,10 @@ void Unavailable(const char* missing)
     uint32_t lowViolence = 1;
     assert(SB_UNAVAILABLE == SteamBridge_UserIsLowViolence(&lowViolence));
     assert(0 == lowViolence);
+    char     launch[8]   = "x";
+    uint32_t launchBytes = 9;
+    assert(SB_UNAVAILABLE == SteamBridge_UserGetLaunchCommandLine(launch, sizeof(launch), &launchBytes));
+    assert(0 == launch[0] && 0 == launchBytes);
     SteamBridge_HostRunCallbacks();
     SteamBridge_HostShutdown();
 }
@@ -143,7 +149,7 @@ void Client(const char* mock)
     assert(SB_OK == SteamBridge_HostInit(mock, 1));
     assert(SB_INVALID_ARGUMENT == SteamBridge_HostInit(mock, 1));
     assert(SteamBridge_HostIsActive() && SteamBridge_HostIsClientActive());
-    assert(5 == mock::stat(MOCK_HOST_CALLBACKS));
+    assert(7 == mock::stat(MOCK_HOST_CALLBACKS));
 
     char     ticket[8]{};
     uint32_t size{};
@@ -175,6 +181,10 @@ void Client(const char* mock)
     uint32_t lowViolence = 1;
     assert(SB_UNAVAILABLE == SteamBridge_UserIsLowViolence(&lowViolence));
     assert(0 == lowViolence);
+    char     launch[8]   = "x";
+    uint32_t launchBytes = 9;
+    assert(SB_UNAVAILABLE == SteamBridge_UserGetLaunchCommandLine(launch, sizeof(launch), &launchBytes));
+    assert(0 == launch[0] && 0 == launchBytes);
 
     assert(SB_OK == SteamBridge_VoiceStartRecording());
     uint32_t available{};
@@ -254,12 +264,25 @@ void Client(const char* mock)
     assert(!std::strcmp("10.0.0.1:27015", events.last.server) && !std::strcmp("secret", events.last.password));
     assert(1 == mock::stat(MOCK_HOST_QUEUED));
 
+    // NewUrlLaunchParameters_t has no fields; Steam may deliver a NULL payload.
+    queue(NewUrlLaunchParameters_t::k_iCallback, false, nullptr, 0);
+    SteamBridge_HostRunCallbacks();
+    assert(3 == events.count && SB_CLIENT_NEW_URL_LAUNCH_PARAMETERS == events.last.kind);
+
+    GameRichPresenceJoinRequested_t join{};
+    join.m_steamIDFriend = CSteamID(uint64(76561198000000005));
+    std::strcpy(join.m_rgchConnect, "+connect 10.0.0.1:27015");
+    Queue(join, false);
+    SteamBridge_HostRunCallbacks();
+    assert(4 == events.count && SB_CLIENT_RICH_PRESENCE_JOIN == events.last.kind);
+    assert(76561198000000005 == events.last.friendSteamID && !std::strcmp("+connect 10.0.0.1:27015", events.last.connect));
+
     GameOverlayActivated_t overlay{};
     overlay.m_bActive = 1;
     Queue(overlay, false);
     events.shutdown = true;
     SteamBridge_HostRunCallbacks();
-    assert(3 == events.count && SB_CLIENT_OVERLAY == events.last.kind && events.last.active);
+    assert(5 == events.count && SB_CLIENT_OVERLAY == events.last.kind && events.last.active);
     assert(!SteamBridge_HostIsActive());
     assert(0 == mock::stat(MOCK_HOST_CALLBACKS) && 1 == mock::stat(MOCK_HOST_SHUTDOWNS));
     assert(2 == forwarded()->portsDestroyed && !SteamBridge_IsFakeIPv4(0xa9fe0102));
@@ -287,6 +310,22 @@ void Apps(const char* mock)
     assert(SB_OK == SteamBridge_UserIsLowViolence(&lowViolence));
     assert(1 == lowViolence);
     assert(SB_INVALID_ARGUMENT == SteamBridge_UserIsLowViolence(nullptr));
+    setLaunchCommandLine("");
+    char     launch[64]  = "x";
+    uint32_t launchBytes = 9;
+    assert(SB_OK == SteamBridge_UserGetLaunchCommandLine(nullptr, 0, &launchBytes) && 0 == launchBytes);
+    assert(SB_OK == SteamBridge_UserGetLaunchCommandLine(launch, sizeof(launch), &launchBytes) && 0 == launchBytes && 0 == launch[0]);
+    setLaunchCommandLine("+connect 10.0.0.1:27015");
+    assert(SB_OK == SteamBridge_UserGetLaunchCommandLine(nullptr, 0, &launchBytes) && 24 == launchBytes);
+    assert(SB_OK == SteamBridge_UserGetLaunchCommandLine(launch, launchBytes, &launchBytes) && 24 == launchBytes);
+    assert(!std::strcmp("+connect 10.0.0.1:27015", launch));
+    char smallLaunch[9]{};
+    assert(SB_OK == SteamBridge_UserGetLaunchCommandLine(smallLaunch, sizeof(smallLaunch), &launchBytes) && 9 == launchBytes);
+    assert(!std::strcmp("+connect", smallLaunch));
+    assert(SB_INVALID_ARGUMENT == SteamBridge_UserGetLaunchCommandLine(launch, sizeof(launch), nullptr));
+    assert(SB_INVALID_ARGUMENT == SteamBridge_UserGetLaunchCommandLine(nullptr, 4, &launchBytes) && 0 == launchBytes);
+    assert(SB_INVALID_ARGUMENT == SteamBridge_UserGetLaunchCommandLine(launch, uint32_t(INT32_MAX) + 1, &launchBytes) && 0 == launchBytes);
+    setLaunchCommandLine("");
     SteamBridge_HostShutdown();
 
     // SteamApps without a language fails the query and still answers the others.
@@ -587,22 +626,23 @@ int main(int argc, char** argv)
     // Hold a fixture reference so its counters persist across bridge sessions.
     auto module = platform::LoadRuntime(argv[1]);
     assert(module);
-    mock::failInit         = platform::Resolve<SetIntFn>(module, "MockHostSetFailInit");
-    mock::voiceResult      = platform::Resolve<SetIntFn>(module, "MockHostSetVoiceResult");
-    mock::stat             = platform::Resolve<StatFn>(module, "MockHostStat");
-    mock::forwarded        = platform::Resolve<ForwardedFn>(module, "MockHostForwarded");
-    mock::queue            = platform::Resolve<QueueFn>(module, "MockHostQueue");
-    mock::queueFake        = platform::Resolve<QueueFakeFn>(module, "MockHostQueueFakeMessage");
-    mock::setFakeIP        = platform::Resolve<SetFakeIPFn>(module, "MockHostSetFakeIP");
-    mock::emitDebug        = platform::Resolve<EmitDebugFn>(module, "MockHostEmitDebug");
-    mock::setApps          = platform::Resolve<SetAppsFn>(module, "MockHostSetApps");
-    mock::setFriends       = platform::Resolve<SetIntFn>(module, "MockHostSetFriends");
-    mock::setServerDetails = platform::Resolve<SetDetailsFn>(module, "MockHostSetServerDetails");
-    mock::listAnswer       = platform::Resolve<AnswerFn>(module, "MockHostServerListAnswer");
-    mock::pingAnswer       = platform::Resolve<SetIntFn>(module, "MockHostPingAnswer");
-    mock::playersAnswer    = platform::Resolve<SetIntFn>(module, "MockHostPlayersAnswer");
+    mock::failInit             = platform::Resolve<SetIntFn>(module, "MockHostSetFailInit");
+    mock::voiceResult          = platform::Resolve<SetIntFn>(module, "MockHostSetVoiceResult");
+    mock::stat                 = platform::Resolve<StatFn>(module, "MockHostStat");
+    mock::forwarded            = platform::Resolve<ForwardedFn>(module, "MockHostForwarded");
+    mock::queue                = platform::Resolve<QueueFn>(module, "MockHostQueue");
+    mock::queueFake            = platform::Resolve<QueueFakeFn>(module, "MockHostQueueFakeMessage");
+    mock::setFakeIP            = platform::Resolve<SetFakeIPFn>(module, "MockHostSetFakeIP");
+    mock::emitDebug            = platform::Resolve<EmitDebugFn>(module, "MockHostEmitDebug");
+    mock::setApps              = platform::Resolve<SetAppsFn>(module, "MockHostSetApps");
+    mock::setLaunchCommandLine = platform::Resolve<SetTextFn>(module, "MockHostSetLaunchCommandLine");
+    mock::setFriends           = platform::Resolve<SetIntFn>(module, "MockHostSetFriends");
+    mock::setServerDetails     = platform::Resolve<SetDetailsFn>(module, "MockHostSetServerDetails");
+    mock::listAnswer           = platform::Resolve<AnswerFn>(module, "MockHostServerListAnswer");
+    mock::pingAnswer           = platform::Resolve<SetIntFn>(module, "MockHostPingAnswer");
+    mock::playersAnswer        = platform::Resolve<SetIntFn>(module, "MockHostPlayersAnswer");
     assert(mock::failInit && mock::voiceResult && mock::stat && mock::forwarded && mock::queue);
-    assert(mock::queueFake && mock::setFakeIP && mock::emitDebug && mock::setApps);
+    assert(mock::queueFake && mock::setFakeIP && mock::emitDebug && mock::setApps && mock::setLaunchCommandLine);
     assert(mock::setFriends && mock::setServerDetails && mock::listAnswer && mock::pingAnswer && mock::playersAnswer);
     Unavailable(argv[2]);
     Client(argv[1]);

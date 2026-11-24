@@ -105,9 +105,11 @@ extern "C"
     // thread-safe; call them from the host's main thread.
     enum
     {
-        SB_CLIENT_GAMESERVER_DENY   = 1,
-        SB_CLIENT_GAMESERVER_CHANGE = 2,
-        SB_CLIENT_OVERLAY           = 3
+        SB_CLIENT_GAMESERVER_DENY           = 1,
+        SB_CLIENT_GAMESERVER_CHANGE         = 2,
+        SB_CLIENT_OVERLAY                   = 3,
+        SB_CLIENT_NEW_URL_LAUNCH_PARAMETERS = 4,
+        SB_CLIENT_RICH_PRESENCE_JOIN        = 5
     };
     enum
     {
@@ -128,11 +130,13 @@ extern "C"
     };
     enum
     {
-        SB_SERVER_TEXT_BYTES   = 128,
-        SB_CLIENT_SERVER_BYTES = 64
+        SB_SERVER_TEXT_BYTES    = 128,
+        SB_CLIENT_SERVER_BYTES  = 64,
+        SB_CLIENT_CONNECT_BYTES = 256
     };
 
     // serverIP/serverPort are copied from Steam's ClientGameServerDeny_t unchanged.
+    // friendSteamID and connect are copied from GameRichPresenceJoinRequested_t.
     typedef struct SteamBridgeClientEvent
     {
         uint32_t kind;
@@ -143,6 +147,8 @@ extern "C"
         uint32_t active;
         char     server[SB_CLIENT_SERVER_BYTES];
         char     password[SB_CLIENT_SERVER_BYTES];
+        uint64_t friendSteamID;
+        char     connect[SB_CLIENT_CONNECT_BYTES];
     } SteamBridgeClientEvent;
     // result is the Steam EResult of a logon failure or a FakeIP request; reason is the EDenyReason of a deny or kick.
     typedef struct SteamBridgeServerEvent
@@ -185,6 +191,9 @@ extern "C"
     // NUL-terminated.
     STEAMBRIDGE_API SteamBridgeStatus STEAMBRIDGE_CALL SteamBridge_UserGetCurrentGameLanguage(char* language, uint32_t capacity);
     STEAMBRIDGE_API SteamBridgeStatus STEAMBRIDGE_CALL SteamBridge_UserIsLowViolence(uint32_t* lowViolence);
+    // Copies the Steam URL launch command line, NUL-terminated. Pass NULL and capacity 0 to
+    // query only the required size (including NUL) in *bytes; *bytes receives zero when none is set.
+    STEAMBRIDGE_API SteamBridgeStatus STEAMBRIDGE_CALL SteamBridge_UserGetLaunchCommandLine(char* commandLine, uint32_t capacity, uint32_t* bytes);
 
     // Voice. Get and Decompress succeed only for Steam's k_EVoiceResultOK; any other
     // voice result returns SB_FAILED with zero lengths.

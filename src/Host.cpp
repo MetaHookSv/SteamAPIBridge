@@ -121,7 +121,7 @@ struct HostCallback final : CCallbackBase
     void Run(void* payload, bool, SteamAPICall_t) override { Run(payload); }
     void Run(void* payload) override
     {
-        if (!payload) return;
+        if (!payload && m_iCallback != NewUrlLaunchParameters_t::k_iCallback) return;
         if (m_nCallbackFlags & k_ECallbackFlagsGameServer) RunServer(payload);
         else if (m_iCallback == FavoritesListChanged_t::k_iCallback || m_iCallback == PersonaStateChange_t::k_iCallback)
             RunMatchmaking(payload);
@@ -155,26 +155,43 @@ struct HostCallback final : CCallbackBase
     void RunClient(void* payload)
     {
         SteamBridgeClientEvent event{};
-        if (m_iCallback == ClientGameServerDeny_t::k_iCallback)
+        switch (m_iCallback)
         {
-            auto p           = static_cast<ClientGameServerDeny_t*>(payload);
-            event.kind       = SB_CLIENT_GAMESERVER_DENY;
-            event.serverIP   = p->m_unGameServerIP;
-            event.serverPort = p->m_usGameServerPort;
-            event.secure     = p->m_bSecure;
-            event.reason     = p->m_uReason;
-        }
-        else if (m_iCallback == GameServerChangeRequested_t::k_iCallback)
-        {
-            auto p     = static_cast<GameServerChangeRequested_t*>(payload);
-            event.kind = SB_CLIENT_GAMESERVER_CHANGE;
-            CopyText(event.server, p->m_rgchServer);
-            CopyText(event.password, p->m_rgchPassword);
-        }
-        else
-        {
-            event.kind   = SB_CLIENT_OVERLAY;
-            event.active = static_cast<GameOverlayActivated_t*>(payload)->m_bActive != 0;
+            case ClientGameServerDeny_t::k_iCallback:
+            {
+                auto p           = static_cast<ClientGameServerDeny_t*>(payload);
+                event.kind       = SB_CLIENT_GAMESERVER_DENY;
+                event.serverIP   = p->m_unGameServerIP;
+                event.serverPort = p->m_usGameServerPort;
+                event.secure     = p->m_bSecure;
+                event.reason     = p->m_uReason;
+                break;
+            }
+            case GameServerChangeRequested_t::k_iCallback:
+            {
+                auto p     = static_cast<GameServerChangeRequested_t*>(payload);
+                event.kind = SB_CLIENT_GAMESERVER_CHANGE;
+                CopyText(event.server, p->m_rgchServer);
+                CopyText(event.password, p->m_rgchPassword);
+                break;
+            }
+            case GameOverlayActivated_t::k_iCallback:
+                event.kind   = SB_CLIENT_OVERLAY;
+                event.active = static_cast<GameOverlayActivated_t*>(payload)->m_bActive != 0;
+                break;
+            case NewUrlLaunchParameters_t::k_iCallback:
+                event.kind = SB_CLIENT_NEW_URL_LAUNCH_PARAMETERS;
+                break;
+            case GameRichPresenceJoinRequested_t::k_iCallback:
+            {
+                auto p              = static_cast<GameRichPresenceJoinRequested_t*>(payload);
+                event.kind          = SB_CLIENT_RICH_PRESENCE_JOIN;
+                event.friendSteamID = p->m_steamIDFriend.ConvertToUint64();
+                CopyText(event.connect, p->m_rgchConnect);
+                break;
+            }
+            default:
+                return;
         }
         Dispatch(host.clientFn, host.clientUser, &event);
     }
@@ -421,6 +438,8 @@ SteamBridgeStatus SteamBridge_HostInit(const char* runtimePath, uint32_t initial
             Register<ClientGameServerDeny_t>(host.clientCallbacks, false);
             Register<GameServerChangeRequested_t>(host.clientCallbacks, false);
             Register<GameOverlayActivated_t>(host.clientCallbacks, false);
+            Register<NewUrlLaunchParameters_t>(host.clientCallbacks, false);
+            Register<GameRichPresenceJoinRequested_t>(host.clientCallbacks, false);
             Register<FavoritesListChanged_t>(host.clientCallbacks, false);
             Register<PersonaStateChange_t>(host.clientCallbacks, false);
         }
@@ -524,6 +543,19 @@ SteamBridgeStatus SteamBridge_UserIsLowViolence(uint32_t* lowViolence)
     *lowViolence = 0;
     if (!host.apps) return SB_UNAVAILABLE;
     *lowViolence = host.apps->BIsLowViolence();
+    return SB_OK;
+}
+SteamBridgeStatus SteamBridge_UserGetLaunchCommandLine(char* commandLine, uint32_t capacity, uint32_t* bytes)
+{
+    if (!bytes) return SB_INVALID_ARGUMENT;
+    *bytes = 0;
+    if (capacity > uint32_t(INT32_MAX) || (capacity && !commandLine)) return SB_INVALID_ARGUMENT;
+    if (commandLine && capacity) commandLine[0] = 0;
+    if (!host.apps) return SB_UNAVAILABLE;
+    int length = host.apps->GetLaunchCommandLine(capacity ? commandLine : nullptr, int(capacity));
+    if (length < 0) return SB_FAILED;
+    if (commandLine && capacity) commandLine[capacity - 1] = 0;
+    *bytes = uint32_t(length);
     return SB_OK;
 }
 
